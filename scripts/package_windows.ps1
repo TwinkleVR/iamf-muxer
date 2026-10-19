@@ -323,6 +323,28 @@ $windeployqt = Join-Path $QtPrefix "bin\windeployqt.exe"
 if (-not (Test-Path $windeployqt)) {
     throw "windeployqt was not found: $windeployqt"
 }
+$qtQmake = Join-Path $QtPrefix "bin\qmake.exe"
+if (-not (Test-Path -LiteralPath $qtQmake)) {
+    throw "qmake was not found in the Qt prefix: $qtQmake"
+}
+$qtVersionOutput = & $qtQmake -query QT_VERSION
+$qtQueryExitCode = $LASTEXITCODE
+$qtVersion = (@($qtVersionOutput) -join "`n").Trim()
+if ($qtQueryExitCode -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Could not determine a valid Qt version from '$qtQmake' (exit code $qtQueryExitCode, output '$qtVersion')."
+}
+$qtSbomDir = Join-Path $QtPrefix "sbom"
+$qtLicenseFile = ""
+foreach ($candidateLicense in @(
+    (Join-Path $QtPrefix "LICENSES\LGPL-3.0-only.txt"),
+    (Join-Path $QtPrefix "licenses\LGPL-3.0-only.txt"),
+    (Join-Path $QtPrefix "licenses\LGPL-3.0.txt")
+)) {
+    if (Test-Path -LiteralPath $candidateLicense -PathType Leaf) {
+        $qtLicenseFile = $candidateLicense
+        break
+    }
+}
 try {
     Invoke-Native $windeployqt @(
         "--release",
@@ -425,12 +447,17 @@ $metadataArgs = @(
     "-DVERSION=$Version",
     "-DPLATFORM=windows",
     "-DARCH=$Arch",
+    "-DQT_VERSION=$qtVersion",
+    "-DQT_SBOM_DIR=$qtSbomDir",
     "-DIAMF_TOOLS_REVISION=$IamfToolsRevision",
     "-DFFMPEG_REVISION=$FfmpegRevision",
     "-P", (Join-Path $root "cmake\write_release_metadata.cmake")
 )
 if (-not [string]::IsNullOrWhiteSpace($ffmpegLicense) -and (Test-Path $ffmpegLicense)) {
     $metadataArgs = @("-DFFMPEG_LICENSE_FILE=$ffmpegLicense") + $metadataArgs
+}
+if (-not [string]::IsNullOrWhiteSpace($qtLicenseFile)) {
+    $metadataArgs = @("-DQT_LICENSE_FILE=$qtLicenseFile") + $metadataArgs
 }
 if (Test-Path (Join-Path $iamfSource "LICENSE")) {
     $metadataArgs = @("-DIAMF_TOOLS_SOURCE_DIR=$iamfSource") + $metadataArgs

@@ -74,6 +74,31 @@ if [[ ! -x "$MACDEPLOYQT" ]]; then
     echo "macdeployqt was not found: $MACDEPLOYQT" >&2
     exit 1
 fi
+QMAKE="${QT_PREFIX}/bin/qmake"
+if [[ ! -x "$QMAKE" ]]; then
+    echo "qmake was not found in the Qt prefix: $QMAKE" >&2
+    exit 1
+fi
+if ! QT_VERSION="$("$QMAKE" -query QT_VERSION)"; then
+    echo "Could not determine the Qt version from $QMAKE" >&2
+    exit 1
+fi
+QT_VERSION="$(printf '%s' "$QT_VERSION" | tr -d '\r\n')"
+if [[ ! "$QT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "qmake returned an invalid Qt version: $QT_VERSION" >&2
+    exit 1
+fi
+QT_SBOM_DIR="${QT_PREFIX}/sbom"
+QT_LICENSE_FILE=""
+for candidate_license in \
+    "${QT_PREFIX}/LICENSES/LGPL-3.0-only.txt" \
+    "${QT_PREFIX}/licenses/LGPL-3.0-only.txt" \
+    "${QT_PREFIX}/licenses/LGPL-3.0.txt"; do
+    if [[ -f "$candidate_license" ]]; then
+        QT_LICENSE_FILE="$candidate_license"
+        break
+    fi
+done
 
 FRAMEWORKS_DIR="${APP_PATH}/Contents/Frameworks"
 mkdir -p "$FRAMEWORKS_DIR"
@@ -140,12 +165,17 @@ METADATA_ARGS=(
     "-DVERSION=${VERSION}"
     "-DPLATFORM=macos"
     "-DARCH=${ARCH}"
+    "-DQT_VERSION=${QT_VERSION}"
+    "-DQT_SBOM_DIR=${QT_SBOM_DIR}"
     "-DIAMF_TOOLS_REVISION=${IAMF_TOOLS_REVISION}"
     "-DFFMPEG_REVISION=${FFMPEG_REVISION}"
     "-DSPDLOG_VERSION=1.17.0"
     "-DSPDLOG_FMT_VERSION=12.1.0"
     -P "${ROOT_DIR}/cmake/write_release_metadata.cmake"
 )
+if [[ -n "$QT_LICENSE_FILE" ]]; then
+    METADATA_ARGS=("-DQT_LICENSE_FILE=${QT_LICENSE_FILE}" "${METADATA_ARGS[@]}")
+fi
 if [[ -n "$FFMPEG_LICENSE_FILE" ]]; then
     METADATA_ARGS=("-DFFMPEG_LICENSE_FILE=${FFMPEG_LICENSE_FILE}" "${METADATA_ARGS[@]}")
 fi
