@@ -6,7 +6,7 @@ BUILD_DIR="${ROOT_DIR}/build-macos"
 QT_PREFIX="${QT_PREFIX:-}"
 FFMPEG_PREFIX="${IMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX:-}"
 OUTPUT_DIR="${ROOT_DIR}/package"
-VERSION="0.9.0"
+VERSION="$(tr -d '\r\n' < "${ROOT_DIR}/VERSION.txt")"
 ARCH="$(uname -m)"
 MIN_MACOS_VERSION="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
 IAMF_TOOLS_REVISION="${IAMF_TOOLS_GIT_TAG:-5c5da5436324ea7882db64314845a4d9049f211d}"
@@ -48,7 +48,7 @@ if [[ "$NO_BUILD" -eq 0 ]]; then
 fi
 
 STAGE_DIR="${OUTPUT_DIR}/macos-stage"
-PACKAGE_NAME="iamf_muxer-${VERSION}-macos-${ARCH}"
+PACKAGE_NAME="iamf-muxer-${VERSION}-macos-${ARCH}"
 PACKAGE_DIR="${OUTPUT_DIR}/${PACKAGE_NAME}"
 ZIP_PATH="${OUTPUT_DIR}/${PACKAGE_NAME}.zip"
 rm -rf "$STAGE_DIR" "$PACKAGE_DIR" "$ZIP_PATH"
@@ -60,7 +60,7 @@ if [[ -z "$FFMPEG_PREFIX" || ! -d "${FFMPEG_PREFIX}/lib" ]]; then
     exit 1
 fi
 
-APP_PATH="$(find "$STAGE_DIR" -maxdepth 2 -type d -name 'iamf_muxer.app' -print -quit)"
+APP_PATH="$(find "$STAGE_DIR" -maxdepth 2 -type d -name 'iamf-muxer.app' -print -quit)"
 if [[ -z "$APP_PATH" ]]; then
     echo "Installed macOS app bundle was not found below $STAGE_DIR" >&2
     exit 1
@@ -124,7 +124,7 @@ while IFS= read -r -d '' plugin; do
         install_name_tool -add_rpath '@loader_path/../../Frameworks' "$plugin" 2>/dev/null
     fi
 done < <(find "$PLUGINS_DIR" -type f -name '*.dylib' -print0)
-APP_EXECUTABLE="${APP_PATH}/Contents/MacOS/iamf_muxer"
+APP_EXECUTABLE="${APP_PATH}/Contents/MacOS/iamf-muxer"
 if command -v install_name_tool >/dev/null 2>&1 && [[ -x "$APP_EXECUTABLE" ]]; then
     install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_EXECUTABLE" 2>/dev/null || true
 fi

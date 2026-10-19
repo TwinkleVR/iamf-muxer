@@ -9,7 +9,16 @@ if(CMAKE_HOST_APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       "macOS architectures to build")
 endif()
 
-project(immersive_audio_muxer VERSION 0.9.0 LANGUAGES CXX)
+set(_immersive_audio_muxer_version_file "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt")
+if(NOT EXISTS "${_immersive_audio_muxer_version_file}")
+  message(FATAL_ERROR "Missing version file: ${_immersive_audio_muxer_version_file}")
+endif()
+file(READ "${_immersive_audio_muxer_version_file}" IMMERSIVE_AUDIO_MUXER_PROJECT_VERSION)
+string(STRIP "${IMMERSIVE_AUDIO_MUXER_PROJECT_VERSION}" IMMERSIVE_AUDIO_MUXER_PROJECT_VERSION)
+if(NOT IMMERSIVE_AUDIO_MUXER_PROJECT_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+  message(FATAL_ERROR "VERSION must contain a numeric version such as 0.9.1, without a leading v")
+endif()
+project(immersive_audio_muxer VERSION "${IMMERSIVE_AUDIO_MUXER_PROJECT_VERSION}" LANGUAGES CXX)
 
 # MinGW's archiver can fail when Ninja runs multiple archive steps at once.
 # Keep link/archive steps serial while allowing compilation to remain parallel.
@@ -265,6 +274,14 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
     list(APPEND _iamf_tools_encoder_byproducts "${_iamf_tools_encoder_implib}")
   endif()
 
+  set(_iamf_tools_terminal_options)
+  if(WIN32 AND CMAKE_GENERATOR MATCHES "Ninja")
+    # Let nested Ninja steps stream progress through the outer build.
+    list(APPEND _iamf_tools_terminal_options
+      USES_TERMINAL_CONFIGURE TRUE
+      USES_TERMINAL_BUILD TRUE)
+  endif()
+
   ExternalProject_Add(official_iamf_tools
     SOURCE_DIR "${_iamf_tools_source_dir}"
     BINARY_DIR "${_iamf_tools_binary_dir}"
@@ -279,7 +296,8 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
                   --config "${_iamf_tools_build_config}"
     BUILD_BYPRODUCTS ${_iamf_tools_encoder_byproducts}
     INSTALL_COMMAND ""
-    BUILD_IN_SOURCE FALSE)
+    BUILD_IN_SOURCE FALSE
+    ${_iamf_tools_terminal_options})
 
   add_library(iamf_tools_encoder_inprocess SHARED IMPORTED GLOBAL)
   set_target_properties(iamf_tools_encoder_inprocess PROPERTIES
@@ -430,47 +448,47 @@ if(IMMERSIVE_AUDIO_MUXER_BUILD_GUI)
   qt_policy(SET QTP0001 NEW)
   qt_policy(SET QTP0004 NEW)
   set(CMAKE_AUTOMOC ON)
-  set(_immersive_audio_muxer_gui_target_options)
+  set(_iamf_muxer_gui_target_options)
   if(APPLE)
-    list(APPEND _immersive_audio_muxer_gui_target_options MACOSX_BUNDLE)
+    list(APPEND _iamf_muxer_gui_target_options MACOSX_BUNDLE)
   endif()
-  qt_add_executable(immersive_audio_muxer_gui ${_immersive_audio_muxer_gui_target_options}
+  qt_add_executable(iamf-muxer ${_iamf_muxer_gui_target_options}
     include/gui_controller.h
     include/gui_input_model.h
     src/gui_main.cpp
     src/gui_controller.cpp
     src/gui_input_model.cpp)
-  set_target_properties(immersive_audio_muxer_gui PROPERTIES
-    OUTPUT_NAME "iamf_muxer")
+  set_target_properties(iamf-muxer PROPERTIES
+    OUTPUT_NAME "iamf-muxer")
   if(WIN32)
-    set_target_properties(immersive_audio_muxer_gui PROPERTIES
+    set_target_properties(iamf-muxer PROPERTIES
       WIN32_EXECUTABLE TRUE)
-    target_sources(immersive_audio_muxer_gui PRIVATE src/iamf_muxer.rc)
+    target_sources(iamf-muxer PRIVATE src/iamf_muxer.rc)
   endif()
   if(APPLE)
     set(_immersive_audio_muxer_macos_icon
         "${CMAKE_SOURCE_DIR}/qml/assets/iamf_muxer.icns")
     set_source_files_properties("${_immersive_audio_muxer_macos_icon}"
       PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    target_sources(immersive_audio_muxer_gui PRIVATE
+    target_sources(iamf-muxer PRIVATE
       "${_immersive_audio_muxer_macos_icon}")
-    set_target_properties(immersive_audio_muxer_gui PROPERTIES
+    set_target_properties(iamf-muxer PROPERTIES
       MACOSX_BUNDLE_ICON_FILE "iamf_muxer.icns"
-      MACOSX_BUNDLE_BUNDLE_NAME "iamf_muxer"
+      MACOSX_BUNDLE_BUNDLE_NAME "iamf-muxer"
       MACOSX_BUNDLE_GUI_IDENTIFIER "com.twinkle.iamf_muxer"
       MACOSX_BUNDLE_SHORT_VERSION_STRING "${IMMERSIVE_AUDIO_MUXER_RELEASE_VERSION}"
       MACOSX_BUNDLE_BUNDLE_VERSION "${IMMERSIVE_AUDIO_MUXER_RELEASE_VERSION}")
   endif()
-  qt_add_qml_module(immersive_audio_muxer_gui
+  qt_add_qml_module(iamf-muxer
     URI ImmersiveAudioMuxer.Gui
     VERSION 1.0
     QML_FILES qml/Main.qml
     RESOURCES qml/assets/iamf_logo_color.png qml/assets/iamf_logo_symbol.svg qml/assets/iamf_muxer_app_icon.svg qml/assets/iamf_muxer_macos_dock_icon.svg qml/assets/iamf_logo_white_symbol.svg qml/assets/ambisonics_symbol.svg qml/assets/stereo_symbol.svg qml/assets/speaker_layout_symbol.svg qml/assets/input_error.wav)
-  target_compile_features(immersive_audio_muxer_gui PRIVATE cxx_std_17)
-  target_include_directories(immersive_audio_muxer_gui PRIVATE
+  target_compile_features(iamf-muxer PRIVATE cxx_std_17)
+  target_include_directories(iamf-muxer PRIVATE
     "${IMMERSIVE_AUDIO_MUXER_GENERATED_INCLUDE_DIR}"
     "${IMMERSIVE_AUDIO_MUXER_FFMPEG_INCLUDE_DIR}")
-  target_link_libraries(immersive_audio_muxer_gui PRIVATE
+  target_link_libraries(iamf-muxer PRIVATE
     immersive_audio_muxer_app
     Qt6::Core
     Qt6::Gui
@@ -480,15 +498,15 @@ if(IMMERSIVE_AUDIO_MUXER_BUILD_GUI)
     Qt6::QuickControls2
     Qt6::QuickDialogs2
     Qt6::Svg)
-  target_compile_definitions(immersive_audio_muxer_gui PRIVATE
+  target_compile_definitions(iamf-muxer PRIVATE
     IMMERSIVE_AUDIO_MUXER_VERSION="${IMMERSIVE_AUDIO_MUXER_RELEASE_VERSION}"
     IMMERSIVE_AUDIO_MUXER_SPDLOG_VERSION="${IMMERSIVE_AUDIO_MUXER_SPDLOG_VERSION}")
   if(WIN32)
-    target_link_libraries(immersive_audio_muxer_gui PRIVATE shell32 ole32)
+    target_link_libraries(iamf-muxer PRIVATE shell32 ole32)
   endif()
 endif()
 
-if(WIN32 AND TARGET immersive_audio_muxer_gui)
+if(WIN32 AND TARGET iamf-muxer)
   if(NOT IMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX OR
      NOT IS_DIRECTORY "${IMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX}/bin")
     message(FATAL_ERROR
@@ -506,21 +524,21 @@ if(WIN32 AND TARGET immersive_audio_muxer_gui)
     list(APPEND _immersive_audio_muxer_ffmpeg_runtime_dlls ${_ffmpeg_runtime_dlls})
   endforeach()
 
-  add_custom_command(TARGET immersive_audio_muxer_gui POST_BUILD
+  add_custom_command(TARGET iamf-muxer POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
       ${_immersive_audio_muxer_ffmpeg_runtime_dlls}
-      "$<TARGET_FILE_DIR:immersive_audio_muxer_gui>"
+      "$<TARGET_FILE_DIR:iamf-muxer>"
     COMMAND_EXPAND_LISTS
     VERBATIM)
 endif()
 
-if(TARGET iamf_tools_encoder_inprocess AND TARGET immersive_audio_muxer_gui)
-  add_dependencies(immersive_audio_muxer_gui official_iamf_tools)
+if(TARGET iamf_tools_encoder_inprocess AND TARGET iamf-muxer)
+  add_dependencies(iamf-muxer official_iamf_tools)
   if(WIN32)
-    add_custom_command(TARGET immersive_audio_muxer_gui POST_BUILD
+    add_custom_command(TARGET iamf-muxer POST_BUILD
       COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${_iamf_tools_encoder_runtime}"
-        "$<TARGET_FILE_DIR:immersive_audio_muxer_gui>"
+        "$<TARGET_FILE_DIR:iamf-muxer>"
       VERBATIM)
   endif()
 endif()
@@ -533,10 +551,10 @@ if(TARGET iamf_tools_encoder_inprocess)
 endif()
 if(IMMERSIVE_AUDIO_MUXER_BUILD_GUI)
   if(APPLE)
-    install(TARGETS immersive_audio_muxer_gui
+    install(TARGETS iamf-muxer
       BUNDLE DESTINATION ".")
   else()
-    install(TARGETS immersive_audio_muxer_gui
+    install(TARGETS iamf-muxer
       RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   endif()
 endif()

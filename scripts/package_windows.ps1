@@ -248,7 +248,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $root "package"
 }
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = "0.1.0"
+    $Version = (Get-Content -LiteralPath (Join-Path $root "VERSION.txt") -Raw).Trim()
 }
 if ([string]::IsNullOrWhiteSpace($IamfToolsRevision)) {
     if ($env:IAMF_TOOLS_GIT_TAG) {
@@ -285,7 +285,7 @@ if (Test-Path -LiteralPath $IamfToolsSourceDir) {
 }
 $outputPath = [System.IO.Path]::GetFullPath($OutputDir)
 $stagePath = Join-Path $outputPath "windows-stage"
-$packageName = "iamf_muxer-$Version-windows-$Arch"
+$packageName = "iamf-muxer-$Version-windows-$Arch"
 $packagePath = Join-Path $outputPath $packageName
 $zipPath = Join-Path $outputPath "$packageName.zip"
 
@@ -310,7 +310,7 @@ if (Test-Path $installedArchiveDirectory) {
     Remove-Item -LiteralPath $installedArchiveDirectory -Recurse -Force
 }
 
-$gui = Get-ChildItem -LiteralPath $stagePath -Filter "iamf_muxer.exe" -Recurse -File |
+$gui = Get-ChildItem -LiteralPath $stagePath -Filter "iamf-muxer.exe" -Recurse -File |
     Select-Object -First 1
 if (-not $gui) {
     throw "The installed GUI executable was not found below $stagePath"
@@ -486,7 +486,7 @@ if (Test-Path -LiteralPath $shareDirectory) {
 }
 
 $requiredFiles = @(
-    (Join-Path $stagePath "bin\iamf_muxer.exe"),
+    (Join-Path $stagePath "bin\iamf-muxer.exe"),
     (Join-Path $stagePath "bin\iamf_tools_encoder_inprocess.dll"),
     (Join-Path $stagePath "bin\Qt6Core.dll"),
     (Join-Path $stagePath "bin\Qt6Gui.dll"),

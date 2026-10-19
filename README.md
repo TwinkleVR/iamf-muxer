@@ -62,7 +62,7 @@ The test targets are enabled by default. After building, run them with:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The `scripts/package_windows.ps1`, `scripts/package_macos.sh`, and `scripts/package_linux.sh` scripts provide platform packaging entry points.
+The `scripts/package_windows.ps1` and `scripts/package_macos.sh` scripts provide platform packaging entry points.
 
 ## How it works
 

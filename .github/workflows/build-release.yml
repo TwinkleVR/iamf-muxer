@@ -15,8 +15,7 @@ on:
       version:
         description: Release version used for a manual build
         type: string
-        default: 0.9.0
-        required: true
+        required: false
   push:
     tags:
       - "v*"
@@ -49,9 +48,7 @@ jobs:
           test -f cmake/patches/iamf-tools-compat.patch
           grep -Fq "$IAMF_TOOLS_GIT_TAG" CMakeLists.txt
           bash -n scripts/build_ffmpeg.sh
-          bash -n scripts/package_linux.sh
           bash -n scripts/package_macos.sh
-          bash -n scripts/linux_apprun.sh
           git diff --check
 
       - name: Resolve release version
@@ -68,7 +65,7 @@ jobs:
             fi
             release_version="${GITHUB_REF_NAME#v}"
           else
-            release_version="${RELEASE_VERSION_INPUT:-0.9.0}"
+            release_version="${RELEASE_VERSION_INPUT:-$(tr -d '\r\n' < VERSION.txt)}"
           fi
           if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release version: $release_version" >&2
@@ -272,7 +269,7 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iamf_muxer-windows-x64
+          name: iamf-muxer-windows-x64
           path: package/*.zip
 
       - name: Upload Windows build diagnostics
@@ -478,7 +475,7 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iamf_muxer-macos-${{ matrix.arch }}
+          name: iamf-muxer-macos-${{ matrix.arch }}
           path: package/*.zip
 
       - name: Upload macOS build diagnostics
@@ -502,7 +499,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets
-          pattern: iamf_muxer-*
+          pattern: iamf-muxer-*
           merge-multiple: true
 
       - name: Generate SHA-256 checksums
