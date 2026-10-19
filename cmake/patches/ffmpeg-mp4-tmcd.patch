@@ -1,0 +1,11 @@
+diff --git a/libavformat/movenc.c b/libavformat/movenc.c
+index 0000000..0000000 100644
+--- a/libavformat/movenc.c
++++ b/libavformat/movenc.c
+@@ -9306,5 +9306,6 @@ static const AVCodecTag codec_mp4_tags[] = {
+     { AV_CODEC_ID_DVD_SUBTITLE,    MKTAG('m', 'p', '4', 's') },
+     { AV_CODEC_ID_MOV_TEXT,        MKTAG('t', 'x', '3', 'g') },
+     { AV_CODEC_ID_BIN_DATA,        MKTAG('g', 'p', 'm', 'd') },
++    { AV_CODEC_ID_BIN_DATA,        MKTAG('t', 'm', 'c', 'd') },
+     { AV_CODEC_ID_MPEGH_3D_AUDIO,  MKTAG('m', 'h', 'm', '1') },
+     { AV_CODEC_ID_TTML,            MOV_MP4_TTML_TAG          },

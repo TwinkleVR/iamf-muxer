@@ -1,0 +1,337 @@
+diff --git a/iamf/cli/adm_to_user_metadata/adm/xml_to_adm.cc b/iamf/cli/adm_to_user_metadata/adm/xml_to_adm.cc
+index 899e6327..fc0eaf6d 100644
+--- a/iamf/cli/adm_to_user_metadata/adm/xml_to_adm.cc
++++ b/iamf/cli/adm_to_user_metadata/adm/xml_to_adm.cc
+@@ -378,7 +378,7 @@ bool IsUserMetadataDefined(absl::string_view xxxx_substring) {
+ // audioPackFormatId (AP_yyyyxxxx) in ADM.
+ bool IsLoudspeakerLayoutValid(absl::string_view xxxx_substring) {
+   static const absl::NoDestructor<absl::flat_hash_set<std::string>>
+-      kValidLoudspeakerLayouts({
++      kValidLoudspeakerLayouts(absl::flat_hash_set<std::string>{
+           {"0001"},  // Mono
+           {"0002"},  // Stereo
+           {"0003"},  // 5.1
+@@ -394,7 +394,7 @@ bool IsLoudspeakerLayoutValid(absl::string_view xxxx_substring) {
+ // (AP_yyyyxxxx) in ADM.
+ bool IsHoaLayoutValid(absl::string_view xxxx_substring) {
+   static const absl::NoDestructor<absl::flat_hash_set<std::string>>
+-      kValidHoaLayouts({
++      kValidHoaLayouts(absl::flat_hash_set<std::string>{
+           {"0001"},  // First-order ambisonics.
+           {"0002"},  // Second-order ambisonics.
+           {"0003"},  // Third-order ambisonics.
+@@ -453,7 +453,7 @@ absl::StatusOr<std::string> CreatePackLayout(
+ // valid pack layouts. Returns an error if invalid.
+ absl::Status ValidatePackLayout(const std::string& pack_layout) {
+   static const absl::NoDestructor<absl::flat_hash_set<std::string>>
+-      kValidPackLayouts({
++      kValidPackLayouts(absl::flat_hash_set<std::string>{
+           {"L,R"},
+           {"L,R,C"},
+           {"L,R,C,Ls,Rs"},
+diff --git a/iamf/cli/adm_to_user_metadata/iamf/mix_presentation_handler.cc b/iamf/cli/adm_to_user_metadata/iamf/mix_presentation_handler.cc
+index 09103ae6..c60fae9f 100644
+--- a/iamf/cli/adm_to_user_metadata/iamf/mix_presentation_handler.cc
++++ b/iamf/cli/adm_to_user_metadata/iamf/mix_presentation_handler.cc
+@@ -45,7 +45,7 @@ LookupSoundSystemFromInputLayout(IamfInputLayout layout) {
+   using enum iamf_tools_cli_proto::SoundSystem;
+   static const absl::NoDestructor<
+       absl::flat_hash_map<IamfInputLayout, iamf_tools_cli_proto::SoundSystem>>
+-      kInputLayoutToSoundSystem({
++      kInputLayoutToSoundSystem(absl::flat_hash_map<IamfInputLayout, iamf_tools_cli_proto::SoundSystem>{
+           {kMono, SOUND_SYSTEM_12_0_1_0},
+           {kStereo, SOUND_SYSTEM_A_0_2_0},
+           {k5_1, SOUND_SYSTEM_B_0_5_0},
+diff --git a/iamf/cli/channel_label.cc b/iamf/cli/channel_label.cc
+index 994a1011..b1a62a20 100644
+--- a/iamf/cli/channel_label.cc
++++ b/iamf/cli/channel_label.cc
+@@ -41,7 +41,7 @@ LookupEarChannelOrderFromNonExpandedLoudspeakerLayout(
+   static const absl::NoDestructor<
+       absl::flat_hash_map<ChannelAudioLayerConfig::LoudspeakerLayout,
+                           std::vector<ChannelLabel::Label>>>
+-      kSoundSystemToLoudspeakerLayout({
++      kSoundSystemToLoudspeakerLayout(absl::flat_hash_map<ChannelAudioLayerConfig::LoudspeakerLayout, std::vector<ChannelLabel::Label>>{
+           {kLayoutMono, {kMono}},
+           {kLayoutStereo, {kL2, kR2}},
+           {kLayout5_1_ch, {kL5, kR5, kCentre, kLFE, kLs5, kRs5}},
+@@ -80,17 +80,20 @@ LookupEarChannelOrderFromExpandedLoudspeakerLayout(
+         expanded_loudspeaker_layout) {
+   using enum ChannelLabel::Label;
+   static const absl::NoDestructor<std::vector<ChannelLabel::Label>>
+-      k9_1_6ChannelOrder({kFL, kFR, kFC, kLFE, kBL, kBR, kFLc, kFRc, kSiL, kSiR,
+-                          kTpFL, kTpFR, kTpBL, kTpBR, kTpSiL, kTpSiR});
++      k9_1_6ChannelOrder(std::vector<ChannelLabel::Label>{
++          kFL, kFR, kFC, kLFE, kBL, kBR, kFLc, kFRc, kSiL, kSiR,
++          kTpFL, kTpFR, kTpBL, kTpBR, kTpSiL, kTpSiR});
+   static const absl::NoDestructor<std::vector<ChannelLabel::Label>>
+-      k10_2_9_3ChannelOrder({kFL,    kFR,    kFC,   kLFE,  kBL,   kBR,
+-                             kFLc,   kFRc,   kBC,   kLFE2, kSiL,  kSiR,
+-                             kTpFL,  kTpFR,  kTpFC, kTpC,  kTpBL, kTpBR,
+-                             kTpSiL, kTpSiR, kTpBC, kBtFC, kBtFL, kBtFR});
++      k10_2_9_3ChannelOrder(std::vector<ChannelLabel::Label>{
++          kFL,    kFR,    kFC,   kLFE,  kBL,   kBR,
++          kFLc,   kFRc,   kBC,   kLFE2, kSiL,  kSiR,
++          kTpFL,  kTpFR,  kTpFC, kTpC,  kTpBL, kTpBR,
++          kTpSiL, kTpSiR, kTpBC, kBtFC, kBtFL, kBtFR});
+   static const absl::NoDestructor<std::vector<ChannelLabel::Label>>
+-      k7_1_5_4ChannelOrder({kL7, kR7, kCentre, kLFE, kLss7, kRss7, kLrs7, kRrs7,
+-                            kLtf4, kRtf4, kLtb4, kRtb4, kTpC, kBtFL, kBtFR,
+-                            kBtBL, kBtBR});
++      k7_1_5_4ChannelOrder(std::vector<ChannelLabel::Label>{
++          kL7, kR7, kCentre, kLFE, kLss7, kRss7, kLrs7, kRrs7,
++          kLtf4, kRtf4, kLtb4, kRtb4, kTpC, kBtFL, kBtFR,
++          kBtBL, kBtBR});
+   // Determine the related layout and then omit any irrelevant channels. This
+   // ensures the permitted channels are in the same slot and allows downstream
+   // processing to use the related layout's EAR matrix.
+@@ -202,7 +205,7 @@ absl::StatusOr<ChannelLabel::Label>
+ ChannelLabel::AmbisonicsChannelNumberToLabel(int ambisonics_channel_number) {
+   using enum ChannelLabel::Label;
+   static const absl::NoDestructor<absl::flat_hash_map<int, ChannelLabel::Label>>
+-      kAmbisonicsChannelNumberToLabel({
++      kAmbisonicsChannelNumberToLabel(absl::flat_hash_map<int, ChannelLabel::Label>{
+           {0, kA0},   {1, kA1},   {2, kA2},   {3, kA3},   {4, kA4},
+           {5, kA5},   {6, kA6},   {7, kA7},   {8, kA8},   {9, kA9},
+           {10, kA10}, {11, kA11}, {12, kA12}, {13, kA13}, {14, kA14},
+@@ -415,7 +418,7 @@ absl::StatusOr<ChannelLabel::Label> ChannelLabel::GetDemixedLabel(
+   using enum ChannelLabel::Label;
+   static const absl::NoDestructor<
+       absl::flat_hash_map<ChannelLabel::Label, ChannelLabel::Label>>
+-      kChannelLabelToDemixedLabel({{kR2, kDemixedR2},
++      kChannelLabelToDemixedLabel(absl::flat_hash_map<ChannelLabel::Label, ChannelLabel::Label>{{kR2, kDemixedR2},
+                                    {kL3, kDemixedL3},
+                                    {kR3, kDemixedR3},
+                                    {kL5, kDemixedL5},
+diff --git a/iamf/cli/itu_1770_4/loudness_calculator_itu_1770_4.cc b/iamf/cli/itu_1770_4/loudness_calculator_itu_1770_4.cc
+index 017713ea..b8d15713 100644
+--- a/iamf/cli/itu_1770_4/loudness_calculator_itu_1770_4.cc
++++ b/iamf/cli/itu_1770_4/loudness_calculator_itu_1770_4.cc
+@@ -79,7 +79,7 @@ absl::StatusOr<std::vector<float>> GetItu1770_4ChannelWeights(
+       using enum LoudspeakersSsConventionLayout::SoundSystem;
+       static const absl::NoDestructor<absl::flat_hash_map<
+           LoudspeakersSsConventionLayout::SoundSystem, std::vector<float>>>
+-          kSsLayoutToItu1440_4Weights({
++          kSsLayoutToItu1440_4Weights(absl::flat_hash_map<LoudspeakersSsConventionLayout::SoundSystem, std::vector<float>>{
+               {kSoundSystemA_0_2_0, {1.0f, 1.0f}},
+               {kSoundSystemB_0_5_0, {1.0f, 1.0f, 1.0f, 0.0f, 1.41f, 1.41f}},
+               {kSoundSystemC_2_5_0,
+diff --git a/iamf/cli/recon_gain_generator.cc b/iamf/cli/recon_gain_generator.cc
+index 1577c452..2981a22b 100644
+--- a/iamf/cli/recon_gain_generator.cc
++++ b/iamf/cli/recon_gain_generator.cc
+@@ -49,7 +49,7 @@ absl::Status FindRelevantMixedSamples(
+   using enum ChannelLabel::Label;
+   static const absl::NoDestructor<
+       absl::flat_hash_map<ChannelLabel::Label, ChannelLabel::Label>>
+-      kLabelToRelevantMixedLabel({{kDemixedL7, kL5},
++      kLabelToRelevantMixedLabel(absl::flat_hash_map<ChannelLabel::Label, ChannelLabel::Label>{{kDemixedL7, kL5},
+                                   {kDemixedR7, kR5},
+                                   {kDemixedLrs7, kLs5},
+                                   {kDemixedRrs7, kRs5},
+diff --git a/iamf/cli/renderer/audio_element_renderer_binaural.cc b/iamf/cli/renderer/audio_element_renderer_binaural.cc
+index 278b06a9..61ff1830 100644
+--- a/iamf/cli/renderer/audio_element_renderer_binaural.cc
++++ b/iamf/cli/renderer/audio_element_renderer_binaural.cc
+@@ -72,7 +72,7 @@ LookupObrAudioElementTypeFromLoudspeakerLayout(
+   using enum ChannelAudioLayerConfig::LoudspeakerLayout;
+   static const absl::NoDestructor<absl::flat_hash_map<
+       ChannelAudioLayerConfig::LoudspeakerLayout, obr::AudioElementType>>
+-      kLoudspeakerLayoutToObrAudioElementType({
++      kLoudspeakerLayoutToObrAudioElementType(absl::flat_hash_map<ChannelAudioLayerConfig::LoudspeakerLayout, obr::AudioElementType>{
+           {kLayoutMono, obr::AudioElementType::kLayoutMono},
+           {kLayoutStereo, obr::AudioElementType::kLayoutStereo},
+           {kLayout5_1_ch, obr::AudioElementType::kLayout5_1_0_ch},
+@@ -100,7 +100,7 @@ GetObrAudioElementTypeFromAmbisonicsConfig(
+   // TODO(b/459993192): OBR to support 0-th order ambisonics.
+   static const absl::NoDestructor<
+       absl::flat_hash_map<int, obr::AudioElementType>>
+-      kAmbisoncisOrderToObrAudioElementType({
++      kAmbisoncisOrderToObrAudioElementType(absl::flat_hash_map<int, obr::AudioElementType>{
+           {1, obr::AudioElementType::k1OA},
+           {2, obr::AudioElementType::k2OA},
+           {3, obr::AudioElementType::k3OA},
+diff --git a/iamf/cli/renderer/audio_element_renderer_channel_to_channel.cc b/iamf/cli/renderer/audio_element_renderer_channel_to_channel.cc
+index f35bc8dd..9dfddeef 100644
+--- a/iamf/cli/renderer/audio_element_renderer_channel_to_channel.cc
++++ b/iamf/cli/renderer/audio_element_renderer_channel_to_channel.cc
+@@ -110,7 +110,7 @@ absl::StatusOr<absl::string_view> LookupInputKeyFromLoudspeakerLayout(
+ 
+   static const absl::NoDestructor<absl::flat_hash_map<
+       ChannelAudioLayerConfig::LoudspeakerLayout, absl::string_view>>
+-      kLoudspeakerLayoutToInputKey({
++      kLoudspeakerLayoutToInputKey(absl::flat_hash_map<ChannelAudioLayerConfig::LoudspeakerLayout, absl::string_view>{
+           {kLayoutMono, kMonoInputKey},
+           {kLayoutStereo, kStereoInputKey},
+           {kLayout5_1_ch, k5_1_chInputKey},
+diff --git a/iamf/cli/renderer/audio_element_renderer_passthrough.cc b/iamf/cli/renderer/audio_element_renderer_passthrough.cc
+index cd09292d..7df9606f 100644
+--- a/iamf/cli/renderer/audio_element_renderer_passthrough.cc
++++ b/iamf/cli/renderer/audio_element_renderer_passthrough.cc
+@@ -46,7 +46,7 @@ absl::StatusOr<bool> IsLoudspeakerLayoutEquivalentToSoundSystem(
+   static const absl::NoDestructor<
+       absl::flat_hash_map<LoudspeakersSsConventionLayout::SoundSystem,
+                           ChannelAudioLayerConfig::LoudspeakerLayout>>
+-      kSoundSystemToLoudspeakerLayout({
++      kSoundSystemToLoudspeakerLayout(absl::flat_hash_map<LoudspeakersSsConventionLayout::SoundSystem, ChannelAudioLayerConfig::LoudspeakerLayout>{
+           {kSoundSystem12_0_1_0, kLayoutMono},
+           {kSoundSystemA_0_2_0, kLayoutStereo},
+           {kSoundSystemB_0_5_0, kLayout5_1_ch},
+diff --git a/iamf/cli/renderer/gains/compressed_gains_codebook.h b/iamf/cli/renderer/gains/compressed_gains_codebook.h
+index fdd0d85d..9b030216 100644
+--- a/iamf/cli/renderer/gains/compressed_gains_codebook.h
++++ b/iamf/cli/renderer/gains/compressed_gains_codebook.h
+@@ -22,7 +22,7 @@ namespace iamf_tools {
+ static inline const std::vector<double>& GetCodebook() {
+   using std::sqrt;
+   static const absl::NoDestructor<std::vector<double>> kCodebook(
+-      {0, 0.5, 1 / sqrt(3), 1 / sqrt(2), sqrt(2.0 / 3.0),
++      std::vector<double>{0, 0.5, 1 / sqrt(3), 1 / sqrt(2), sqrt(2.0 / 3.0),
+        (1 + (1 / sqrt(2))) / 2, 1.0, 2 / sqrt(3), 1 / (sqrt(2)) + 0.5,
+        sqrt(3.0 / 2.0)});
+   return *kCodebook;
+diff --git a/iamf/cli/renderer/renderer_utils.cc b/iamf/cli/renderer/renderer_utils.cc
+index 5fa2ed1e..c48130d4 100644
+--- a/iamf/cli/renderer/renderer_utils.cc
++++ b/iamf/cli/renderer/renderer_utils.cc
+@@ -137,7 +137,7 @@ absl::StatusOr<std::string> LookupOutputKeyFromPlaybackLayout(
+       using enum LoudspeakersSsConventionLayout::SoundSystem;
+       static const absl::NoDestructor<absl::flat_hash_map<
+           LoudspeakersSsConventionLayout::SoundSystem, std::string>>
+-          kSoundSystemToOutputKey({
++          kSoundSystemToOutputKey(absl::flat_hash_map<LoudspeakersSsConventionLayout::SoundSystem, std::string>{
+               {kSoundSystemA_0_2_0, "0+2+0"},
+               {kSoundSystemB_0_5_0, "0+5+0"},
+               {kSoundSystemC_2_5_0, "2+5+0"},
+diff --git a/iamf/cli/user_metadata_builder/audio_element_metadata_builder.cc b/iamf/cli/user_metadata_builder/audio_element_metadata_builder.cc
+index 549b7beb..d30960bb 100644
+--- a/iamf/cli/user_metadata_builder/audio_element_metadata_builder.cc
++++ b/iamf/cli/user_metadata_builder/audio_element_metadata_builder.cc
+@@ -34,7 +34,7 @@ absl::StatusOr<int32_t> LookupNumSubstreamsFromInputLayout(
+   // corresponding to it.
+   using enum IamfInputLayout;
+   static const absl::NoDestructor<absl::flat_hash_map<IamfInputLayout, int32_t>>
+-      kInputLayoutToNumSubstreams({
++      kInputLayoutToNumSubstreams(absl::flat_hash_map<IamfInputLayout, int32_t>{
+           {kMono, 1},
+           {kStereo, 1},
+           {k5_1, 4},
+@@ -63,7 +63,7 @@ LookupLoudspeakerLayoutFromInputLayout(IamfInputLayout input_layout) {
+   // in IAMF.
+   static const absl::NoDestructor<absl::flat_hash_map<
+       IamfInputLayout, iamf_tools_cli_proto::LoudspeakerLayout>>
+-      KInputLayoutToLoudspeakerLayout({
++      KInputLayoutToLoudspeakerLayout(absl::flat_hash_map<IamfInputLayout, iamf_tools_cli_proto::LoudspeakerLayout>{
+           {kMono, LOUDSPEAKER_LAYOUT_MONO},
+           {kStereo, LOUDSPEAKER_LAYOUT_STEREO},
+           {k5_1, LOUDSPEAKER_LAYOUT_5_1_CH},
+@@ -88,7 +88,7 @@ LookupExpandedLoudspeakerLayoutFromInputLayout(IamfInputLayout input_layout) {
+   // loudspeaker layout in IAMF.
+   static const absl::NoDestructor<absl::flat_hash_map<
+       IamfInputLayout, iamf_tools_cli_proto::ExpandedLoudspeakerLayout>>
+-      KInputLayoutToExpandedLoudspeakerLayout({
++      KInputLayoutToExpandedLoudspeakerLayout(absl::flat_hash_map<IamfInputLayout, iamf_tools_cli_proto::ExpandedLoudspeakerLayout>{
+           {kLFE, EXPANDED_LOUDSPEAKER_LAYOUT_LFE},
+       });
+ 
+@@ -105,7 +105,7 @@ LookupAudioElementTypeFromInputLayout(IamfInputLayout input_layout) {
+   // type.
+   static const absl::NoDestructor<absl::flat_hash_map<
+       IamfInputLayout, iamf_tools_cli_proto::AudioElementType>>
+-      KInputLayoutToAudioElementType({
++      KInputLayoutToAudioElementType(absl::flat_hash_map<IamfInputLayout, iamf_tools_cli_proto::AudioElementType>{
+           {kMono, AUDIO_ELEMENT_CHANNEL_BASED},
+           {kStereo, AUDIO_ELEMENT_CHANNEL_BASED},
+           {k5_1, AUDIO_ELEMENT_CHANNEL_BASED},
+diff --git a/iamf/cli/user_metadata_builder/audio_frame_metadata_builder.cc b/iamf/cli/user_metadata_builder/audio_frame_metadata_builder.cc
+index df18b614..2a065933 100644
+--- a/iamf/cli/user_metadata_builder/audio_frame_metadata_builder.cc
++++ b/iamf/cli/user_metadata_builder/audio_frame_metadata_builder.cc
+@@ -37,7 +37,7 @@ LookupLabelsFromInputLayout(IamfInputLayout input_layout) {
+   using enum iamf_tools_cli_proto::ChannelLabel;
+   static const absl::NoDestructor<absl::flat_hash_map<
+       IamfInputLayout, std::vector<iamf_tools_cli_proto::ChannelLabel>>>
+-      kIamfInputLayoutToProtoLabels({
++      kIamfInputLayoutToProtoLabels(absl::flat_hash_map<IamfInputLayout, std::vector<iamf_tools_cli_proto::ChannelLabel>>{
+           {kMono, {CHANNEL_LABEL_MONO}},
+           {kStereo, {CHANNEL_LABEL_L_2, CHANNEL_LABEL_R_2}},
+           {k5_1,
+diff --git a/iamf/cli/user_metadata_builder/iamf_input_layout.cc b/iamf/cli/user_metadata_builder/iamf_input_layout.cc
+index 6b701cc9..7e9468f0 100644
+--- a/iamf/cli/user_metadata_builder/iamf_input_layout.cc
++++ b/iamf/cli/user_metadata_builder/iamf_input_layout.cc
+@@ -27,7 +27,7 @@ absl::StatusOr<IamfInputLayout> LookupInputLayoutFromAudioPackFormatId(
+   using enum IamfInputLayout;
+   static const absl::NoDestructor<
+       absl::flat_hash_map<absl::string_view, IamfInputLayout>>
+-      kAudioPackFormatIdToIamfInputLayoutInputLayout({
++      kAudioPackFormatIdToIamfInputLayoutInputLayout(absl::flat_hash_map<absl::string_view, IamfInputLayout>{
+           {"AP_00010001", IamfInputLayout::kMono},
+           {"AP_00010002", IamfInputLayout::kStereo},
+           {"AP_00010003", IamfInputLayout::k5_1},
+diff --git a/iamf/obu/decoder_config/flac_decoder_config.cc b/iamf/obu/decoder_config/flac_decoder_config.cc
+index f0beec1e..670c9033 100644
+--- a/iamf/obu/decoder_config/flac_decoder_config.cc
++++ b/iamf/obu/decoder_config/flac_decoder_config.cc
+@@ -59,7 +59,7 @@ absl::Status ValidateSampleRate(uint32_t sample_rate) {
+   //
+   // Set is arranged in the order as listed in the related RFC.
+   static const absl::NoDestructor<absl::flat_hash_set<uint32_t>>
+-      kAllowedSampleRates({88200, 176400, 192000, 8000, 16000, 22050, 24000,
++      kAllowedSampleRates(absl::flat_hash_set<uint32_t>{88200, 176400, 192000, 8000, 16000, 22050, 24000,
+                            32000, 44100, 48000, 96000});
+   if (kAllowedSampleRates->contains(sample_rate)) {
+     return absl::OkStatus();
+@@ -72,7 +72,7 @@ absl::Status ValidateBitsPerSample(uint8_t raw_bits_per_sample) {
+   // SHALL be set to one of 15, 23 or 31, corresponding to 16, 24 or 32 bits
+   // respectively.
+   static const absl::NoDestructor<absl::flat_hash_set<uint8_t>>
+-      kAllowedBitsPerSample({15, 23, 31});
++      kAllowedBitsPerSample(absl::flat_hash_set<uint8_t>{15, 23, 31});
+   if (kAllowedBitsPerSample->contains(raw_bits_per_sample)) {
+     return absl::OkStatus();
+   }
+diff --git a/iamf/obu/demixing_info_parameter_data.cc b/iamf/obu/demixing_info_parameter_data.cc
+index 9a061c12..16dd0972 100644
+--- a/iamf/obu/demixing_info_parameter_data.cc
++++ b/iamf/obu/demixing_info_parameter_data.cc
+@@ -33,7 +33,7 @@ absl::Status DemixingInfoParameterData::DMixPModeToDownMixingParams(
+   static const absl::NoDestructor<
+       absl::flat_hash_map<DMixPMode, DownMixingParams>>
+       kDmixPModeToDownMixingParamValues(
+-          {{kDMixPMode1, {1, 1, 0.707, 0.707, -1, 0}},
++          absl::flat_hash_map<DMixPMode, DownMixingParams>{{kDMixPMode1, {1, 1, 0.707, 0.707, -1, 0}},
+            {kDMixPMode2, {0.707, 0.707, 0.707, 0.707, -1, 0}},
+            {kDMixPMode3, {1, 0.866, 0.866, 0.866, -1, 0}},
+            {kDMixPMode1_n, {1, 1, 0.707, 0.707, 1, 0}},
+@@ -41,7 +41,7 @@ absl::Status DemixingInfoParameterData::DMixPModeToDownMixingParams(
+            {kDMixPMode3_n, {1, 0.866, 0.866, 0.866, 1, 0}}});
+ 
+   static const absl::NoDestructor<absl::flat_hash_map<int, double>>
+-      kWIdxToWValues({{0, 0},
++      kWIdxToWValues(absl::flat_hash_map<int, double>{{0, 0},
+                       {1, 0.0179},
+                       {2, 0.0391},
+                       {3, 0.0658},
+diff --git a/iamf/obu/mix_presentation.cc b/iamf/obu/mix_presentation.cc
+index 6769565b..4e612c03 100644
+--- a/iamf/obu/mix_presentation.cc
++++ b/iamf/obu/mix_presentation.cc
+@@ -371,7 +371,7 @@ const auto& GetTagRestrictions() {
+   // restrictions.
+   static const absl::NoDestructor<
+       absl::flat_hash_map<absl::string_view, TagRestriction>>
+-      kTagRestrictions({
++      kTagRestrictions(absl::flat_hash_map<absl::string_view, TagRestriction>{
+           {"content_language",
+            {.max_count = 1, .validate_value = &ValidateCompliesWithIso639_2}},
+           {"content_type", {.max_count = 1}},
+@@ -527,7 +527,7 @@ absl::Status MixPresentationObu::GetNumChannelsFromLayout(
+       using enum LoudspeakersSsConventionLayout::SoundSystem;
+       static const absl::NoDestructor<absl::flat_hash_map<
+           LoudspeakersSsConventionLayout::SoundSystem, int32_t>>
+-          kSoundSystemToNumChannels({
++          kSoundSystemToNumChannels(absl::flat_hash_map<LoudspeakersSsConventionLayout::SoundSystem, int32_t>{
+               {kSoundSystemA_0_2_0, 2},
+               {kSoundSystemB_0_5_0, 6},
+               {kSoundSystemC_2_5_0, 8},

@@ -1,0 +1,295 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 5002488e..08d14f92 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,14 +1,3 @@
+-# Optional CMake build path for the encoder_main / decoder_main / probe_main
+-# CLIs, for environments where Bazel is unavailable (registry-restricted
+-# networks, no BCR / release-archive access). See iamf-tools#75.
+-#
+-# This is NOT the supported build; Bazel remains the build system of record
+-# (see docs/build_instructions.md). This file is written from scratch against
+-# the Bazel BUILD graph; no Bazel-generated content is used or derived.
+-#
+-# Invoke via ./build_cmake.sh (which clones and builds the dependencies, then
+-# configures this file with IAMF_CMAKE_DEPS_ROOT pointing at those checkouts).
+-# Dependency pins mirror MODULE.bazel; move them forward as upstream moves.
+ cmake_minimum_required(VERSION 3.22)
+ project(iamf_tools LANGUAGES C CXX)
+ 
+@@ -18,69 +7,158 @@ set(CMAKE_C_STANDARD 11)
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ add_compile_options(-Wno-sign-compare)
+ 
+-set(IAMF ${CMAKE_CURRENT_SOURCE_DIR})
+-set(IAMF_CMAKE_DEPS_ROOT "" CACHE PATH
+-    "Directory holding the dependency checkouts and shims (populated by build_cmake.sh)")
+-if(NOT IAMF_CMAKE_DEPS_ROOT OR NOT EXISTS ${IAMF_CMAKE_DEPS_ROOT})
+-  message(FATAL_ERROR
+-      "IAMF_CMAKE_DEPS_ROOT is not set (or does not exist). This build path is "
+-      "driven by ./build_cmake.sh, which clones the dependencies and passes "
+-      "-DIAMF_CMAKE_DEPS_ROOT=<deps dir>. Run ./build_cmake.sh [ROOT] instead "
+-      "of invoking cmake directly.")
+-endif()
+-set(SRC ${IAMF_CMAKE_DEPS_ROOT})
++option(IAMF_TOOLS_BUILD_SHARED "Build IAMF tools libraries as shared libraries" OFF)
++option(IAMF_TOOLS_BUILD_CLI "Build IAMF tools command line tools" ON)
++option(IAMF_TOOLS_BUILD_INPROCESS_ENCODER
++       "Build the in-process encoder shared library" OFF)
++set(BUILD_SHARED_LIBS "${IAMF_TOOLS_BUILD_SHARED}" CACHE BOOL "" FORCE)
++set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" CACHE PATH "Runtime output" FORCE)
++set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" CACHE PATH "Library output" FORCE)
++set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" CACHE PATH "Archive output" FORCE)
+ 
+-find_package(absl REQUIRED CONFIG)
+-find_package(utf8_range CONFIG)          # exported by protobuf install
+-find_package(protobuf REQUIRED CONFIG)
++include(FetchContent)
++set(FETCHCONTENT_FULLY_DISCONNECTED OFF CACHE BOOL "" FORCE)
++set(ABSL_PROPAGATE_CXX_STD ON CACHE BOOL "" FORCE)
++set(ABSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)
++set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
++set(protobuf_BUILD_PROTOBUF_BINARIES ON CACHE BOOL "" FORCE)
++set(protobuf_BUILD_PROTOC_BINARIES ON CACHE BOOL "" FORCE)
++set(protobuf_BUILD_LIBUPB ON CACHE BOOL "" FORCE)
++set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
++set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
++set(protobuf_ABSL_PROVIDER module CACHE STRING "" FORCE)
++set(utf8_range_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
++set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
++set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
++set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
++set(WITH_OGG OFF CACHE BOOL "" FORCE)
++set(INSTALL_MANPAGES OFF CACHE BOOL "" FORCE)
++set(BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
++set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
++set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
++set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
++set(EXPAT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
++set(EXPAT_BUILD_DOCS OFF CACHE BOOL "" FORCE)
++set(EXPAT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
++set(EXPAT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
++set(EXPAT_BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
++set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
++set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+ 
+-find_library(OPUS_LIB opus REQUIRED)
+-find_library(FLAC_LIB FLAC REQUIRED)
+-find_library(EXPAT_LIB expat REQUIRED)
++FetchContent_Declare(absl
++  GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
++  GIT_TAG 20260526.0)
++FetchContent_Declare(protobuf
++  GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
++  GIT_TAG v36.0)
++FetchContent_Declare(eigen
++  GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
++  GIT_TAG 3.4.0)
++FetchContent_Declare(fdk_aac
++  GIT_REPOSITORY https://github.com/mstorsjo/fdk-aac.git
++  GIT_TAG ee76460efbdb147e26d804c798949c23f174460b)
++FetchContent_Declare(libopus
++  GIT_REPOSITORY https://github.com/xiph/opus.git
++  GIT_TAG ddbe48383984d56acd9e1ab6a090c54ca6b735a6)
++FetchContent_Declare(flac
++  GIT_REPOSITORY https://github.com/xiph/flac.git
++  GIT_TAG 8d648456a2d7444d54a579e365bab4c815ac6873)
++FetchContent_Declare(expat
++  GIT_REPOSITORY https://github.com/libexpat/libexpat.git
++  GIT_TAG fa75b96546c069d17b8f80d91e0f4ef0cde3790d
++  SOURCE_SUBDIR expat)
++FetchContent_Declare(obr
++  GIT_REPOSITORY https://github.com/google/obr.git
++  GIT_TAG 478dc7c752d5eccae534635139ff0253eee3a14a)
++FetchContent_Declare(ebur128
++  GIT_REPOSITORY https://github.com/google/loudness_ebur128.git
++  GIT_TAG e9e73147637db60dc742cba8a611a37dd72b14b5)
++FetchContent_Declare(audio_to_tactile
++  GIT_REPOSITORY https://github.com/google/audio-to-tactile.git
++  GIT_TAG d3f449fdfd8cfe4a845d0ae244fce2a0bca34a15)
++FetchContent_Declare(pffft
++  GIT_REPOSITORY https://github.com/marton78/pffft.git
++  GIT_TAG a4b03590cc2a4bea56f9721996e3057835799179)
+ 
+-# Eigen is header-only and ships under an `eigen3/` suffix on every distro, but
+-# the prefix is not portable: Debian/Ubuntu use /usr/include/eigen3, Homebrew
+-# uses ${brew_prefix}/include/eigen3, and macOS has no /usr/include at all.
+-# Discover it rather than hardcoding one distro's layout.
+-find_path(EIGEN_INC NAMES Eigen/Core PATH_SUFFIXES eigen3 REQUIRED)
++FetchContent_MakeAvailable(absl protobuf eigen libopus flac expat)
++foreach(_source_dependency IN ITEMS fdk_aac pffft obr ebur128 audio_to_tactile)
++  FetchContent_GetProperties(${_source_dependency})
++  if(NOT ${_source_dependency}_POPULATED)
++    FetchContent_Populate(${_source_dependency})
++  endif()
++endforeach()
++
++set(IAMF ${CMAKE_CURRENT_SOURCE_DIR})
++set(FDK_AAC_SOURCE_DIR "${fdk_aac_SOURCE_DIR}")
++set(PFFFT_SOURCE_DIR "${pffft_SOURCE_DIR}")
++set(OBR_SOURCE_DIR "${obr_SOURCE_DIR}")
++set(EBUR128_SOURCE_DIR "${ebur128_SOURCE_DIR}")
++set(AUDIO_TO_TACTILE_SOURCE_DIR "${audio_to_tactile_SOURCE_DIR}")
++set(FLAC_SOURCE_DIR "${flac_SOURCE_DIR}")
++set(OPUS_SOURCE_DIR "${libopus_SOURCE_DIR}")
++set(EXPAT_SOURCE_DIR "${expat_SOURCE_DIR}/expat")
++set(EIGEN_INC "${eigen_SOURCE_DIR}")
+ 
+ # ---------------- FDK-AAC (exact upstream pin, own CMake) -------------------
+ # Non-recursive on purpose: lib*/src/{arm,mips,x86}/ hold #include-only
+ # assembly specializations that do not compile standalone.
+-file(GLOB FDK_SRCS ${SRC}/fdk_aac/lib*/src/*.cpp)
++if(MINGW)
++  set(_fdk_common_fix_header
++    "${FDK_AAC_SOURCE_DIR}/libFDK/include/common_fix.h")
++  file(READ "${_fdk_common_fix_header}" _fdk_common_fix_contents)
++  set(_fdk_short_overload_guard
++    "#if !defined(_MSC_VER) && defined(__x86_64__)")
++  set(_fdk_mingw_short_overload_guard
++    "#if !defined(_MSC_VER) && defined(__x86_64__) && !defined(__MINGW64__)")
++  string(FIND "${_fdk_common_fix_contents}"
++    "${_fdk_mingw_short_overload_guard}" _fdk_mingw_guard_position)
++  if(_fdk_mingw_guard_position EQUAL -1)
++    string(FIND "${_fdk_common_fix_contents}"
++      "${_fdk_short_overload_guard}" _fdk_short_guard_position)
++    if(_fdk_short_guard_position EQUAL -1)
++      message(FATAL_ERROR "Could not apply the FDK-AAC MinGW overload fix.")
++    endif()
++    string(REPLACE "${_fdk_short_overload_guard}"
++      "${_fdk_mingw_short_overload_guard}"
++      _fdk_common_fix_contents "${_fdk_common_fix_contents}")
++    file(WRITE "${_fdk_common_fix_header}" "${_fdk_common_fix_contents}")
++  endif()
++endif()
++file(GLOB FDK_SRCS ${FDK_AAC_SOURCE_DIR}/lib*/src/*.cpp)
+ add_library(fdk_aac_static STATIC ${FDK_SRCS})
+-file(GLOB FDK_INC_DIRS ${SRC}/fdk_aac/lib*/include)
+-target_include_directories(fdk_aac_static PUBLIC ${FDK_INC_DIRS} ${SRC}/fdk_aac)
++file(GLOB FDK_INC_DIRS ${FDK_AAC_SOURCE_DIR}/lib*/include)
++target_include_directories(fdk_aac_static PUBLIC ${FDK_INC_DIRS} ${FDK_AAC_SOURCE_DIR})
+ 
+ # ---------------- pffft ------------------------------------------------------
+-# marton78/pffft mirror keeps sources under src/ (upstream jpommier keeps them
+-# at repo root); pffft_common.c provides the shared aligned-malloc helpers.
+-add_library(pffft_static STATIC ${SRC}/pffft/src/pffft.c ${SRC}/pffft/src/pffft_common.c)
++add_library(pffft_static STATIC ${PFFFT_SOURCE_DIR}/src/pffft.c ${PFFFT_SOURCE_DIR}/src/pffft_common.c)
+ target_include_directories(pffft_static PUBLIC
+-    ${SRC}/pffft/src ${SRC}/pffft/include/pffft)
++    ${PFFFT_SOURCE_DIR}/src ${PFFFT_SOURCE_DIR}/include/pffft)
++target_compile_definitions(pffft_static PUBLIC PFFFT_STATIC_DEFINE)
+ 
+ # ---------------- audio-to-tactile :dsp -------------------------------------
+-file(GLOB A2T_SRCS ${SRC}/audio_to_tactile/src/dsp/*.c)
++file(GLOB A2T_SRCS ${AUDIO_TO_TACTILE_SOURCE_DIR}/src/dsp/*.c)
+ add_library(a2t_dsp STATIC ${A2T_SRCS})
+-target_include_directories(a2t_dsp PUBLIC ${SRC}/audio_to_tactile/src ${SRC}/audio_to_tactile)
+-target_link_libraries(a2t_dsp PUBLIC m)
++target_include_directories(a2t_dsp PUBLIC ${AUDIO_TO_TACTILE_SOURCE_DIR}/src ${AUDIO_TO_TACTILE_SOURCE_DIR})
++if(UNIX)
++  target_link_libraries(a2t_dsp PUBLIC m)
++endif()
+ 
+ # ---------------- loudness_ebur128 ------------------------------------------
+-file(GLOB EBUR_SRCS ${SRC}/loudness_ebur128/src/*.cc)
++file(GLOB EBUR_SRCS ${EBUR128_SOURCE_DIR}/src/*.cc)
+ add_library(ebur128_analyzer STATIC ${EBUR_SRCS})
+ target_include_directories(ebur128_analyzer PUBLIC
+-    ${SRC}/loudness_ebur128 ${SRC}/loudness_ebur128/src)
++  ${EBUR128_SOURCE_DIR} ${EBUR128_SOURCE_DIR}/src)
+ target_link_libraries(ebur128_analyzer PUBLIC absl::status absl::statusor
+-    absl::strings absl::span)
++  absl::strings absl::span)
+ 
+ # ---------------- OBR (binaural renderer) -----------------------------------
+-file(GLOB_RECURSE OBR_SRCS ${SRC}/obr/obr/*.cc)
++file(GLOB_RECURSE OBR_SRCS ${OBR_SOURCE_DIR}/obr/*.cc)
+ list(FILTER OBR_SRCS EXCLUDE REGEX "/tests?/|_test\\.cc|test_util\\.cc|/cli/")
+ add_library(obr_lib STATIC ${OBR_SRCS})
+-target_include_directories(obr_lib PUBLIC ${SRC}/obr ${EIGEN_INC})
++target_include_directories(obr_lib PUBLIC ${OBR_SOURCE_DIR} ${EIGEN_INC})
+ target_link_libraries(obr_lib PUBLIC pffft_static a2t_dsp
+-    absl::log absl::check absl::status absl::statusor absl::strings
+-    absl::flat_hash_map absl::span)
++  absl::log absl::check absl::status absl::statusor absl::strings
++  absl::flat_hash_map absl::span)
+ 
+ # ---------------- proto codegen ---------------------------------------------
+ file(GLOB IAMF_PROTOS ${IAMF}/iamf/cli/proto/*.proto)
+@@ -90,7 +168,7 @@ set(PROTO_SRCS "")
+ foreach(P ${IAMF_PROTOS})
+   file(RELATIVE_PATH REL ${IAMF} ${P})
+   string(REPLACE ".proto" ".pb.cc" GEN_CC ${PROTO_GEN_DIR}/${REL})
+-  string(REPLACE ".proto" ".pb.h"  GEN_H  ${PROTO_GEN_DIR}/${REL})
++  string(REPLACE ".proto" ".pb.h" GEN_H ${PROTO_GEN_DIR}/${REL})
+   add_custom_command(
+     OUTPUT ${GEN_CC} ${GEN_H}
+     COMMAND protobuf::protoc --proto_path=${IAMF} --cpp_out=${PROTO_GEN_DIR} ${REL}
+@@ -105,27 +183,47 @@ target_link_libraries(iamf_protos PUBLIC protobuf::libprotobuf)
+ # ---------------- iamf-tools core -------------------------------------------
+ file(GLOB_RECURSE IAMF_SRCS ${IAMF}/iamf/*.cc)
+ list(FILTER IAMF_SRCS EXCLUDE REGEX "/tests/|_test\\.cc|_fuzz|_benchmark")
+-list(FILTER IAMF_SRCS EXCLUDE REGEX "encoder_main\\.cc|decoder_main\\.cc|probe_main\\.cc|adm_to_user_metadata_main\\.cc")
++list(FILTER IAMF_SRCS EXCLUDE REGEX "encoder_main\\.cc|decoder_main\\.cc|probe_main\\.cc|adm_to_user_metadata_main\\.cc|encoder_inprocess_api\\.cc")
+ add_library(iamf_core STATIC ${IAMF_SRCS})
+ target_include_directories(iamf_core PUBLIC
+-    ${IAMF}
+-    ${SRC}/protobuf              # bazel-style "src/google/protobuf/..." includes
+-    ${SRC}/shims/flac            # "include/FLAC/..."
+-    ${SRC}/shims/opus            # "include/opus.h"
+-    ${SRC}/shims/expat           # "lib/expat.h"
+-    ${EIGEN_INC})
++  ${IAMF}
++  ${protobuf_SOURCE_DIR}
++  ${FLAC_SOURCE_DIR}
++  ${OPUS_SOURCE_DIR}
++  ${EXPAT_SOURCE_DIR}
++  ${EIGEN_INC})
+ target_link_libraries(iamf_core PUBLIC
+-    iamf_protos ebur128_analyzer obr_lib a2t_dsp fdk_aac_static
+-    ${OPUS_LIB} ${FLAC_LIB} ${EXPAT_LIB}
+-    absl::base absl::log absl::log_initialize absl::log_globals absl::check
+-    absl::flags absl::flags_parse absl::flags_usage
+-    absl::status absl::status_macros absl::statusor absl::strings
+-    absl::str_format absl::flat_hash_map absl::flat_hash_set absl::node_hash_map
+-    absl::span absl::optional absl::time absl::synchronization
+-    absl::memory absl::random_random absl::die_if_null absl::cleanup
+-    absl::no_destructor absl::overload absl::any_invocable)
+-
+-foreach(TOOL encoder_main decoder_main probe_main)
+-  add_executable(${TOOL} ${IAMF}/iamf/cli/${TOOL}.cc)
+-  target_link_libraries(${TOOL} PRIVATE iamf_core)
+-endforeach()
++  iamf_protos ebur128_analyzer obr_lib a2t_dsp fdk_aac_static
++  opus FLAC expat
++  absl::base absl::log absl::log_initialize absl::log_globals absl::check
++  absl::flags absl::flags_parse absl::flags_usage
++  absl::status absl::status_macros absl::statusor absl::strings
++  absl::str_format absl::flat_hash_map absl::flat_hash_set absl::node_hash_map
++  absl::span absl::optional absl::time absl::synchronization
++  absl::memory absl::random_random absl::die_if_null absl::cleanup
++  absl::no_destructor absl::overload absl::any_invocable)
++
++if(IAMF_TOOLS_BUILD_CLI)
++  foreach(TOOL encoder_main decoder_main probe_main)
++    add_executable(${TOOL} ${IAMF}/iamf/cli/${TOOL}.cc)
++    target_link_libraries(${TOOL} PRIVATE iamf_core)
++  endforeach()
++endif()
++
++if(IAMF_TOOLS_BUILD_INPROCESS_ENCODER)
++  add_library(iamf_tools_encoder_inprocess SHARED
++    ${IAMF}/iamf/cli/encoder_inprocess_api.cc)
++  target_include_directories(iamf_tools_encoder_inprocess PUBLIC ${IAMF})
++  target_include_directories(iamf_tools_encoder_inprocess PRIVATE
++    "${IMMERSIVE_AUDIO_MUXER_API_INCLUDE_DIR}")
++  target_link_libraries(iamf_tools_encoder_inprocess PRIVATE iamf_core)
++  if(MINGW)
++    target_link_libraries(iamf_tools_encoder_inprocess PRIVATE
++      "-Wl,-Bstatic" winpthread "-Wl,-Bdynamic")
++  endif()
++  if(WIN32)
++    set_target_properties(iamf_tools_encoder_inprocess PROPERTIES
++      PREFIX "" IMPORT_PREFIX "" OUTPUT_NAME iamf_tools_encoder_inprocess)
++  endif()
++endif()
++

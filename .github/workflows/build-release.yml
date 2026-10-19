@@ -1,0 +1,516 @@
+name: Build and package releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        options:
+          - windows
+          - macos-arm64
+          - all
+        default: windows
+        required: true
+      version:
+        description: Release version used for a manual build
+        type: string
+        default: 0.9.0
+        required: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  IAMF_TOOLS_GIT_TAG: 5ad3728679495d0037c9be7334338f2859d2a3fa
+  # FFmpeg n9.0.2 release commit (peeled from the annotated tag).
+  FFMPEG_GIT_TAG: 946fcce07b6dcd0331c8cc609192aeff5e1924f8
+  QT_VERSION: 6.11.1
+
+jobs:
+  validate:
+    name: Validate pinned release inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      release_version: ${{ steps.resolve-release-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate patches, revisions, and scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f cmake/patches/iamf-tools-cmake.patch
+          test -f cmake/patches/iamf-tools-inprocess.patch
+          test -f cmake/patches/iamf-tools-compat.patch
+          grep -Fq "$IAMF_TOOLS_GIT_TAG" CMakeLists.txt
+          bash -n scripts/build_ffmpeg.sh
+          bash -n scripts/package_linux.sh
+          bash -n scripts/package_macos.sh
+          bash -n scripts/linux_apprun.sh
+          git diff --check
+
+      - name: Resolve release version
+        id: resolve-release-version
+        shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if [[ "$GITHUB_REF_NAME" != v* ]]; then
+              echo "Release tags must start with v: $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            release_version="${GITHUB_REF_NAME#v}"
+          else
+            release_version="${RELEASE_VERSION_INPUT:-0.9.0}"
+          fi
+          if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $release_version" >&2
+            exit 1
+          fi
+          echo "Resolved release version: $release_version"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+
+  windows-x64:
+    name: Windows MinGW x64
+    needs: validate
+    if: github.event_name == 'push' || inputs.target == 'windows' || inputs.target == 'all'
+    runs-on: windows-2022
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          dir: ${{ github.workspace }}/_qt
+          # Qt 6.11 Windows includes qtdeclarative and qtsvg in the default base package.
+          modules: qtmultimedia
+          tools: tools_mingw1310,qt.tools.win64_mingw1310
+          # aqtinstall 3.3.0 does not handle Qt 6.11's Windows repository layout.
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@7e5a5c3d95cf962cfc2f36c86ffa0d2c07f1a0d4
+          add-tools-to-path: true
+          cache: true
+
+      - name: Install MinGW build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-yasm
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Verify Qt and select matching MinGW toolchain
+        shell: pwsh
+        run: |
+          $qtPrefix = $env:QT_ROOT_DIR
+          if ([string]::IsNullOrWhiteSpace($qtPrefix)) {
+            throw "install-qt-action did not set QT_ROOT_DIR."
+          }
+          foreach ($requiredPath in @(
+              (Join-Path $qtPrefix "lib\cmake\Qt6\Qt6Config.cmake"),
+              (Join-Path $qtPrefix "bin\windeployqt.exe")
+          )) {
+            if (-not (Test-Path -LiteralPath $requiredPath)) {
+              throw "Required Qt installation file was not found: $requiredPath"
+            }
+          }
+          $compiler = Get-Command g++.exe -ErrorAction Stop
+          $mingwBin = Split-Path $compiler.Source -Parent
+          if ($mingwBin -notmatch "mingw1310_64") {
+            throw "Expected Qt MinGW 13.1.0, but g++.exe resolved to $($compiler.Source)"
+          }
+          $compilerVersion = (& $compiler.Source -dumpfullversion).Trim()
+          if ($LASTEXITCODE -ne 0 -or $compilerVersion -ne "13.1.0") {
+            throw "Expected MinGW 13.1.0, got '$compilerVersion' from $($compiler.Source)"
+          }
+          "QT_MINGW_BIN=$mingwBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CC=$mingwBin\gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=$($compiler.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Using Qt at $qtPrefix"
+          Write-Host "Using MinGW compiler $($compiler.Source) ($compilerVersion)"
+
+      - name: Restore Windows FFmpeg prefix cache
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: _deps/ffmpeg-prefix
+          key: windows-ffmpeg-qt${{ env.QT_VERSION }}-mingw1310-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            windows-ffmpeg-qt${{ env.QT_VERSION }}-mingw1310-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-
+
+      - name: Validate cached FFmpeg prefix
+        id: ffmpeg-cache-check
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build-logs -Force | Out-Null
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "_deps\ffmpeg-prefix"
+          $revisionFile = Join-Path $prefix "FFmpeg-revision.txt"
+          $cacheValid = Test-Path -LiteralPath $revisionFile
+          if ($cacheValid) {
+            $cachedRevision = (Get-Content -LiteralPath $revisionFile -Raw).Trim()
+            $cacheValid = $cachedRevision -eq $env:FFMPEG_GIT_TAG
+            "Cached FFmpeg revision: $cachedRevision" | Set-Content -LiteralPath build-logs\ffmpeg-cache.log
+          } else {
+            "No cached FFmpeg revision file found." | Set-Content -LiteralPath build-logs\ffmpeg-cache.log
+          }
+          $requiredFiles = @(
+              "include\libavformat\avformat.h",
+              "lib\libavcodec.dll.a",
+              "lib\libavformat.dll.a",
+              "lib\libavutil.dll.a",
+              "lib\libswresample.dll.a",
+              "FFmpeg-LICENSES.txt"
+          )
+          foreach ($relativePath in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $prefix $relativePath))) {
+              "Missing cached FFmpeg file: $relativePath" | Add-Content -LiteralPath build-logs\ffmpeg-cache.log
+              $cacheValid = $false
+            }
+          }
+          foreach ($library in @("avcodec", "avformat", "avutil", "swresample")) {
+            if (-not (Get-ChildItem -LiteralPath (Join-Path $prefix "bin") -Filter "$library-*.dll" -File -ErrorAction SilentlyContinue)) {
+              "Missing cached FFmpeg runtime DLL family: $library" | Add-Content -LiteralPath build-logs\ffmpeg-cache.log
+              $cacheValid = $false
+            }
+          }
+          "FFmpeg cache valid: $cacheValid" | Add-Content -LiteralPath build-logs\ffmpeg-cache.log
+          "valid=$($cacheValid.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build FFmpeg prefix
+        if: steps.ffmpeg-cache-check.outputs.valid != 'true'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          ROOT="$(cygpath -u "$GITHUB_WORKSPACE")"
+          QT_MINGW_BIN_UNIX="$(cygpath -u "$QT_MINGW_BIN")"
+          mkdir -p "$ROOT/build-logs"
+          export PATH="$QT_MINGW_BIN_UNIX:/ucrt64/bin:/usr/bin:$PATH"
+          export CC="$QT_MINGW_BIN_UNIX/gcc.exe"
+          "$CC" -dumpfullversion
+          bash "$ROOT/scripts/build_ffmpeg.sh" \
+            --source-dir "$ROOT/_deps/ffmpeg" \
+            --prefix "$ROOT/_deps/ffmpeg-prefix" \
+            --revision "$FFMPEG_GIT_TAG" \
+            --jobs "$(nproc)" 2>&1 | tee "$ROOT/build-logs/ffmpeg-build.log"
+
+      - name: Save Windows FFmpeg prefix cache
+        if: steps.ffmpeg-cache-check.outputs.valid != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: _deps/ffmpeg-prefix
+          key: windows-ffmpeg-qt${{ env.QT_VERSION }}-mingw1310-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:QT_MINGW_BIN;$env:PATH"
+          $qtPrefix = $env:QT_ROOT_DIR
+          if (-not (Test-Path -LiteralPath $qtPrefix)) {
+            throw "Qt root directory was not found: $qtPrefix"
+          }
+          cmake -S . -B build-release -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX=package/stage `
+            -DCMAKE_PREFIX_PATH="$qtPrefix" `
+            -DQt6_DIR="$qtPrefix\lib\cmake\Qt6" `
+            -DCMAKE_C_COMPILER="$env:QT_MINGW_BIN\gcc.exe" `
+            -DCMAKE_CXX_COMPILER="$env:QT_MINGW_BIN\g++.exe" `
+            -DIMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX="$env:GITHUB_WORKSPACE\_deps\ffmpeg-prefix" `
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_GUI=ON `
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_TESTS=ON `
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_RELEASE_BUNDLE=ON `
+            -DIMMERSIVE_AUDIO_MUXER_RELEASE_VERSION="$env:RELEASE_VERSION" `
+            -DIMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL=ON `
+            "-DIMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_GIT_TAG=$env:IAMF_TOOLS_GIT_TAG" `
+            2>&1 | Tee-Object -FilePath build-logs\configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:QT_MINGW_BIN;$env:PATH"
+          cmake --build build-release 2>&1 | Tee-Object -FilePath build-logs\build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build-release --output-on-failure 2>&1 | Tee-Object -FilePath build-logs\ctest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package Windows portable ZIP
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:QT_MINGW_BIN;$env:PATH"
+          $qtPrefix = $env:QT_ROOT_DIR
+          ./scripts/package_windows.ps1 `
+            -BuildDir "$env:GITHUB_WORKSPACE\build-release" `
+            -QtPrefix $qtPrefix `
+            -FfmpegPrefix "$env:GITHUB_WORKSPACE\_deps\ffmpeg-prefix" `
+            -OutputDir "$env:GITHUB_WORKSPACE\package" `
+            -Version $env:RELEASE_VERSION `
+            -IamfToolsRevision $env:IAMF_TOOLS_GIT_TAG `
+            -FfmpegRevision $env:FFMPEG_GIT_TAG `
+            -NoBuild 2>&1 | Tee-Object -FilePath build-logs\package.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iamf_muxer-windows-x64
+          path: package/*.zip
+
+      - name: Upload Windows build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-windows-x64
+          path: build-logs/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: validate
+    if: github.event_name == 'push' || inputs.target == 'macos-arm64' || inputs.target == 'all'
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.release_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64]
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify macOS runner architecture
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          actual_arch="$(uname -m)"
+          if [[ "$actual_arch" != "$EXPECTED_ARCH" ]]; then
+            echo "Expected macOS runner architecture $EXPECTED_ARCH, got $actual_arch" >&2
+            exit 1
+          fi
+          echo "Using macOS $actual_arch runner"
+
+      - name: Install build dependencies
+        run: brew install ninja pkg-config nasm yasm
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          dir: ${{ github.workspace }}/_qt
+          modules: qtmultimedia
+          archives: qtbase qtdeclarative qtsvg
+          cache: true
+
+      - name: Identify macOS toolchain
+        id: macos-toolchain
+        run: |
+          set -euo pipefail
+          xcode_version="$(xcodebuild -version | tr '\n' ' ')"
+          clang_version="$(clang --version | sed -n '1p')"
+          cache_key="$(printf '%s\n%s\n' "$xcode_version" "$clang_version" | shasum -a 256 | cut -c1-16)"
+          echo "Xcode: $xcode_version"
+          echo "Clang: $clang_version"
+          echo "cache_key=$cache_key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore macOS FFmpeg prefix cache
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: _deps/ffmpeg-prefix
+          key: macos-ffmpeg-${{ matrix.arch }}-macos-15-${{ steps.macos-toolchain.outputs.cache_key }}-deployment-14-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macos-ffmpeg-${{ matrix.arch }}-macos-15-${{ steps.macos-toolchain.outputs.cache_key }}-deployment-14-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-
+
+      - name: Validate cached macOS FFmpeg prefix
+        id: ffmpeg-cache-check
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs
+          prefix="$GITHUB_WORKSPACE/_deps/ffmpeg-prefix"
+          log="build-logs/ffmpeg-cache.log"
+          cache_valid=true
+          printf 'Checking FFmpeg cache for %s\n' "$EXPECTED_ARCH" > "$log"
+
+          revision_file="$prefix/FFmpeg-revision.txt"
+          if [[ ! -f "$revision_file" ]]; then
+            echo "Missing cached FFmpeg revision file." | tee -a "$log"
+            cache_valid=false
+          else
+            cached_revision="$(tr -d '\r\n' < "$revision_file")"
+            echo "Cached FFmpeg revision: $cached_revision" | tee -a "$log"
+            if [[ "$cached_revision" != "$FFMPEG_GIT_TAG" ]]; then
+              echo "Cached FFmpeg revision does not match $FFMPEG_GIT_TAG." | tee -a "$log"
+              cache_valid=false
+            fi
+          fi
+
+          required_files=(
+            include/libavcodec/avcodec.h
+            include/libavformat/avformat.h
+            include/libavutil/avutil.h
+            include/libswresample/swresample.h
+            lib/libavcodec.dylib
+            lib/libavformat.dylib
+            lib/libavutil.dylib
+            lib/libswresample.dylib
+            FFmpeg-LICENSES.txt
+          )
+          for relative_path in "${required_files[@]}"; do
+            if [[ ! -f "$prefix/$relative_path" ]]; then
+              echo "Missing cached FFmpeg file: $relative_path" | tee -a "$log"
+              cache_valid=false
+            fi
+          done
+
+          shopt -s nullglob
+          for library in avcodec avformat avutil swresample; do
+            found_library=false
+            for runtime in "$prefix"/lib/lib${library}*.dylib; do
+              found_library=true
+              if ! architectures="$(lipo -archs "$runtime" 2>/dev/null)"; then
+                echo "Could not inspect cached FFmpeg dylib: $runtime" | tee -a "$log"
+                cache_valid=false
+              elif [[ " $architectures " != *" $EXPECTED_ARCH "* ]]; then
+                echo "Wrong architecture for cached FFmpeg dylib: $runtime ($architectures)" | tee -a "$log"
+                cache_valid=false
+              fi
+            done
+            if [[ "$found_library" != true ]]; then
+              echo "Missing cached FFmpeg dylib family: $library" | tee -a "$log"
+              cache_valid=false
+            fi
+          done
+
+          echo "FFmpeg cache valid: $cache_valid" | tee -a "$log"
+          echo "valid=$cache_valid" >> "$GITHUB_OUTPUT"
+
+      - name: Remove invalid macOS FFmpeg prefix
+        if: steps.ffmpeg-cache-check.outputs.valid != 'true'
+        run: rm -rf "$GITHUB_WORKSPACE/_deps/ffmpeg-prefix"
+
+      - name: Build FFmpeg prefix
+        if: steps.ffmpeg-cache-check.outputs.valid != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs
+          bash scripts/build_ffmpeg.sh \
+            --source-dir "$GITHUB_WORKSPACE/_deps/ffmpeg" \
+            --prefix "$GITHUB_WORKSPACE/_deps/ffmpeg-prefix" \
+            --revision "$FFMPEG_GIT_TAG" \
+            --jobs "$(sysctl -n hw.ncpu)" 2>&1 | tee build-logs/ffmpeg-build.log
+
+      - name: Save macOS FFmpeg prefix cache
+        if: steps.ffmpeg-cache-check.outputs.valid != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: _deps/ffmpeg-prefix
+          key: macos-ffmpeg-${{ matrix.arch }}-macos-15-${{ steps.macos-toolchain.outputs.cache_key }}-deployment-14-${{ env.FFMPEG_GIT_TAG }}-${{ hashFiles('scripts/build_ffmpeg.sh', 'cmake/patches/ffmpeg-mp4-tmcd.patch') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          QT_PREFIX="$QT_ROOT_DIR"
+          test -f "$QT_PREFIX/lib/cmake/Qt6/Qt6Config.cmake"
+          cmake -S . -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/package/stage" \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+            -DQt6_DIR="$QT_PREFIX/lib/cmake/Qt6" \
+            -DCMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" \
+            -DIMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX="$GITHUB_WORKSPACE/_deps/ffmpeg-prefix" \
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_GUI=ON \
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_TESTS=ON \
+            -DIMMERSIVE_AUDIO_MUXER_BUILD_RELEASE_BUNDLE=ON \
+            -DIMMERSIVE_AUDIO_MUXER_RELEASE_VERSION="$RELEASE_VERSION" \
+            -DIMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL=ON \
+            -DIMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_GIT_TAG="$IAMF_TOOLS_GIT_TAG" \
+            2>&1 | tee build-logs/configure.log
+
+      - name: Build and test
+        run: |
+          set -euo pipefail
+          cmake --build build-release 2>&1 | tee build-logs/build.log
+          ctest --test-dir build-release --output-on-failure 2>&1 | tee build-logs/ctest.log
+
+      - name: Package macOS app
+        run: |
+          set -euo pipefail
+          QT_PREFIX="$QT_ROOT_DIR"
+          IMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX="$GITHUB_WORKSPACE/_deps/ffmpeg-prefix"
+          bash scripts/package_macos.sh \
+            --build-dir "$GITHUB_WORKSPACE/build-release" \
+            --qt-prefix "$QT_PREFIX" \
+            --ffmpeg-prefix "$IMMERSIVE_AUDIO_MUXER_FFMPEG_PREFIX" \
+            --output-dir "$GITHUB_WORKSPACE/package" \
+            --version "$RELEASE_VERSION" \
+            --arch "${{ matrix.arch }}" \
+            --no-build 2>&1 | tee build-logs/package.log
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iamf_muxer-macos-${{ matrix.arch }}
+          path: package/*.zip
+
+      - name: Upload macOS build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-macos-${{ matrix.arch }}
+          path: build-logs/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  release-assets:
+    name: Checksums and release assets
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-x64, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: iamf_muxer-*
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true

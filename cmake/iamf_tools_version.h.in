@@ -1,0 +1,3 @@
+#pragma once
+
+#define IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_REVISION "@_iamf_tools_display_revision@"

@@ -1,0 +1,20 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+ColumnLimit: 140
+BreakBeforeBraces: Attach
+PointerAlignment: Left
+NamespaceIndentation: None
+SortIncludes: Never
+IncludeBlocks: Preserve
+BinPackArguments: true
+BinPackParameters: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+BreakBeforeBinaryOperators: None
+ReflowComments: false

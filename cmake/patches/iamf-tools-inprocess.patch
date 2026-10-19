@@ -1,0 +1,677 @@
+diff --git a/iamf/cli/encoder_main_lib.cc b/iamf/cli/encoder_main_lib.cc
+index 7e0b7ef..0c9e0c8 100644
+--- a/iamf/cli/encoder_main_lib.cc
++++ b/iamf/cli/encoder_main_lib.cc
+@@ -36,6 +36,8 @@
+ #include "iamf/cli/proto/test_vector_metadata.pb.h"
+ #include "iamf/cli/proto/user_metadata.pb.h"
+ #include "iamf/cli/proto_conversion/channel_label_utils.h"
++#include "iamf/cli/proto_conversion/proto_to_obu/audio_element_generator.h"
++#include "iamf/cli/proto_conversion/proto_to_obu/codec_config_generator.h"
+ #include "iamf/cli/proto_conversion/output_audio_format_utils.h"
+ #include "iamf/cli/rendering_mix_presentation_finalizer.h"
+ #include "iamf/cli/sample_processor_base.h"
+@@ -55,6 +57,15 @@ using iamf_tools_cli_proto::ChannelLabelMessage;
+ using iamf_tools_cli_proto::ParameterBlockObuMetadata;
+ using iamf_tools_cli_proto::UserMetadata;
+ 
++std::string PathToUtf8(const std::filesystem::path& path) {
++#if defined(__cpp_char8_t)
++  const auto value = path.u8string();
++  return std::string(reinterpret_cast<const char*>(value.data()), value.size());
++#else
++  return path.u8string();
++#endif
++}
++
+ absl::Status PartitionParameterMetadata(UserMetadata& user_metadata) {
+   uint32_t partition_duration = 0;
+   if (user_metadata.ia_sequence_header_metadata().empty() ||
+@@ -113,14 +124,16 @@ absl::Status CollectLabeledSamplesForAudioElements(
+ }
+ 
+ absl::Status CreateOutputDirectory(const std::string& output_directory) {
++  const std::filesystem::path output_directory_path =
++      std::filesystem::u8path(output_directory);
+   if (output_directory.empty() ||
+-      std::filesystem::is_directory(output_directory) ||
+-      std::filesystem::is_character_file(output_directory)) {
++      std::filesystem::is_directory(output_directory_path) ||
++      std::filesystem::is_character_file(output_directory_path)) {
+     return absl::OkStatus();
+   }
+ 
+   std::error_code error_code;
+-  if (!std::filesystem::create_directories(output_directory, error_code)) {
++  if (!std::filesystem::create_directories(output_directory_path, error_code)) {
+     return absl::UnknownError(
+         absl::StrCat("Failed to create output directory = ", output_directory));
+   }
+@@ -156,10 +169,22 @@ absl::Status LabeledSamplesToAudioElementData(
+ 
+ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+                                       const std::string& input_wav_directory,
+-                                      IamfEncoder& iamf_encoder) {
++                                      IamfEncoder& iamf_encoder,
++                                      const EncoderRunOptions& options) {
++  DescriptorObus::CodecConfigsById codec_configs;
++  CodecConfigGenerator codec_config_generator(
++      user_metadata.codec_config_metadata());
++  RETURN_IF_NOT_OK(codec_config_generator.Generate(codec_configs));
++
++  DescriptorObus::AudioElementsById audio_elements;
++  AudioElementGenerator audio_element_generator(
++      user_metadata.audio_element_metadata());
++  RETURN_IF_NOT_OK(
++      audio_element_generator.Generate(codec_configs, audio_elements));
++
+   auto wav_sample_provider = WavSampleProvider::Create(
+       user_metadata.audio_frame_metadata(), input_wav_directory,
+-      iamf_encoder.GetAudioElements());
++      audio_elements);
+   if (!wav_sample_provider.ok()) {
+     return wav_sample_provider.status();
+   }
+@@ -177,6 +202,9 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+   // slots in the inner maps; we can reuse them.
+   api::IamfTemporalUnitData temporal_unit_data;
+   while (iamf_encoder.GeneratingTemporalUnits()) {
++    if (options.cancellation_requested && options.cancellation_requested()) {
++      return absl::CancelledError("IAMF encode cancelled by caller");
++    }
+     ABSL_LOG_EVERY_N_SEC(INFO, 5)
+         << "\n\n============================= Generating Temporal Units Iter #"
+         << temporal_unit_iteration++ << " =============================\n";
+@@ -188,8 +216,8 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+     absl::flat_hash_map<DecodedUleb128, LabelSamplesMap> id_to_labeled_samples;
+     bool no_more_real_samples = false;
+     RETURN_IF_NOT_OK(CollectLabeledSamplesForAudioElements(
+-        iamf_encoder.GetAudioElements(), *wav_sample_provider,
+-        id_to_labeled_samples, no_more_real_samples));
++        audio_elements, *wav_sample_provider, id_to_labeled_samples,
++        no_more_real_samples));
+ 
+     // Adapt the audio samples into the expected format for the encoder.
+     for (const auto& [audio_element_id, labeled_samples] :
+@@ -231,6 +259,10 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+     std::vector<uint8_t> unused_temporal_unit_obus;
+     RETURN_IF_NOT_OK(
+         iamf_encoder.OutputTemporalUnit(unused_temporal_unit_obus));
++
++    if (options.cancellation_requested && options.cancellation_requested()) {
++      return absl::CancelledError("IAMF encode cancelled by caller");
++    }
+   }
+   ABSL_LOG(INFO)
+       << "\n============================= END of Generating Data OBUs"
+@@ -244,6 +276,14 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+ absl::Status TestMain(const UserMetadata& input_user_metadata,
+                       const std::string& input_wav_directory,
+                       const std::string& output_iamf_directory) {
++  return TestMain(input_user_metadata, input_wav_directory,
++                  output_iamf_directory, EncoderRunOptions());
++}
++
++absl::Status TestMain(const UserMetadata& input_user_metadata,
++                      const std::string& input_wav_directory,
++                      const std::string& output_iamf_directory,
++                      const EncoderRunOptions& options) {
+   // Make a copy before modifying.
+   UserMetadata user_metadata(input_user_metadata);
+ 
+@@ -259,10 +299,10 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
+ 
+   // Write the output audio streams which were used to measure loudness to the
+   // same directory as the IAMF file.
+-  const std::string output_wav_file_prefix =
+-      (std::filesystem::path(output_iamf_directory) /
+-       user_metadata.test_vector_metadata().file_name_prefix())
+-          .string();
++  const std::string output_wav_file_prefix = PathToUtf8(
++      std::filesystem::u8path(output_iamf_directory) /
++      std::filesystem::u8path(
++          user_metadata.test_vector_metadata().file_name_prefix()));
+   ABSL_LOG(INFO) << "output_wav_file_prefix = " << output_wav_file_prefix;
+   RenderingMixPresentationFinalizer::SampleProcessorFactory
+       sample_processor_factory =
+@@ -308,7 +348,7 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
+   // Push all audio data to the encoder, at the end, the file is closed and
+   // finalized.
+   RETURN_IF_NOT_OK(GenerateTemporalUnitObus(user_metadata, input_wav_directory,
+-                                            **iamf_encoder));
++                                            **iamf_encoder, options));
+ 
+   // In a streaming based application we would query `GetDescriptorObus` for the
+   // finalized descriptor OBUs. Then push the data to any clients that rely on
+diff --git a/iamf/cli/encoder_main_lib.h b/iamf/cli/encoder_main_lib.h
+index 20ae997..0ef58bf 100644
+--- a/iamf/cli/encoder_main_lib.h
++++ b/iamf/cli/encoder_main_lib.h
+@@ -12,6 +12,7 @@
+ #ifndef CLI_ENCODER_MAIN_LIB_H_
+ #define CLI_ENCODER_MAIN_LIB_H_
+ 
++#include <functional>
+ #include <string>
+ 
+ #include "absl/status/status.h"
+@@ -25,9 +26,17 @@
+  * \return `absl::OkStatus()` on success. A specific status on failure.
+  */
+ namespace iamf_tools {
++struct EncoderRunOptions {
++  std::function<bool()> cancellation_requested;
++};
++
+ absl::Status TestMain(const iamf_tools_cli_proto::UserMetadata& user_metadata,
+                       const std::string& input_wav_directory,
+                       const std::string& output_iamf_directory);
++absl::Status TestMain(const iamf_tools_cli_proto::UserMetadata& user_metadata,
++                      const std::string& input_wav_directory,
++                      const std::string& output_iamf_directory,
++                      const EncoderRunOptions& options);
+ }
+ 
+ #endif  // CLI_ENCODER_MAIN_LIB_H_
+diff --git a/iamf/cli/iamf_components.cc b/iamf/cli/iamf_components.cc
+index a84e493..0b63f64 100644
+--- a/iamf/cli/iamf_components.cc
++++ b/iamf/cli/iamf_components.cc
+@@ -36,6 +36,15 @@ namespace {
+ constexpr absl::string_view kOmitIamfFile = "";
+ constexpr TrimmingSettings kDefaultTrimmingSettings{};
+ 
++std::string PathToUtf8(const std::filesystem::path& path) {
++#if defined(__cpp_char8_t)
++  const auto value = path.u8string();
++  return std::string(reinterpret_cast<const char*>(value.data()), value.size());
++#else
++  return path.u8string();
++#endif
++}
++
+ }  // namespace
+ 
+ std::unique_ptr<LayoutRendererFactory> CreateLayoutRendererFactory() {
+@@ -62,12 +71,14 @@ std::vector<std::unique_ptr<ObuSequencerBase>> CreateObuSequencers(
+   const std::string& prefix =
+       user_metadata.test_vector_metadata().file_name_prefix();
+ 
++  const std::filesystem::path output_directory =
++      std::filesystem::u8path(output_iamf_directory);
+   // Create an OBU sequencer that writes to a standalone IAMF file.
+   const std::string iamf_filename =
+       prefix.empty() ? std::string(kOmitIamfFile)
+-                     : (std::filesystem::path(output_iamf_directory) /
+-                        std::filesystem::path(absl::StrCat(prefix, ".iamf")))
+-                           .string();
++                     : PathToUtf8(output_directory /
++                                  std::filesystem::u8path(
++                                      absl::StrCat(prefix, ".iamf")));
+   obu_sequencers.emplace_back(std::make_unique<ObuSequencerIamf>(
+       iamf_filename, include_temporal_delimiters, *leb_generator));
+ 
+diff --git a/iamf/cli/obu_sequencer_iamf.cc b/iamf/cli/obu_sequencer_iamf.cc
+index f2aa560..4e0699c 100644
+--- a/iamf/cli/obu_sequencer_iamf.cc
++++ b/iamf/cli/obu_sequencer_iamf.cc
+@@ -48,7 +48,7 @@ void MaybeRemoveFile(const std::string& filename,
+   file_to_remove->close();
+   file_to_remove = std::nullopt;
+   std::error_code error_code;
+-  std::filesystem::remove(filename, error_code);
++  std::filesystem::remove(std::filesystem::u8path(filename), error_code);
+   if (!error_code) {
+     // File clean up failed somehow. Just log the error and move on.
+     ABSL_LOG(ERROR).WithPerror() << "Failed to remove " << filename;
+@@ -73,7 +73,8 @@ absl::Status ObuSequencerIamf::PushSerializedDescriptorObus(
+   if (!iamf_filename_.empty()) {
+     ABSL_LOG(INFO) << "Writing descriptor OBUs to " << iamf_filename_;
+ 
+-    output_iamf_.emplace(iamf_filename_, std::fstream::out | std::ios::binary);
++    output_iamf_.emplace(std::filesystem::u8path(iamf_filename_),
++                         std::fstream::out | std::ios::binary);
+   }
+ 
+   RETURN_IF_NOT_OK(wb_.WriteUint8Span(descriptor_obus));
+diff --git a/iamf/cli/wav_reader.cc b/iamf/cli/wav_reader.cc
+index 839b13b..2d1c882 100644
+--- a/iamf/cli/wav_reader.cc
++++ b/iamf/cli/wav_reader.cc
+@@ -18,6 +18,7 @@
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
++#include <filesystem>
+ #include <limits>
+ #include <string>
+ #include <utility>
+@@ -69,7 +70,12 @@ absl::StatusOr<WavReader> WavReader::CreateFromFile(
+     return absl::InvalidArgumentError("num_samples_per_frame must be > 0");
+   }
+   ABSL_LOG(INFO) << "Reading \"" << wav_filename << "\"";
++#if defined(_WIN32)
++  const auto wav_path = std::filesystem::u8path(wav_filename);
++  FILE* file = _wfopen(wav_path.c_str(), L"rb");
++#else
+   FILE* file = std::fopen(wav_filename.c_str(), "rb");
++#endif
+   if (file == nullptr) {
+     return absl::FailedPreconditionError(
+         absl::StrCat("Failed to open file: \"", wav_filename,
+diff --git a/iamf/cli/wav_sample_provider.cc b/iamf/cli/wav_sample_provider.cc
+index 7fc683f..2607ba9 100644
+--- a/iamf/cli/wav_sample_provider.cc
++++ b/iamf/cli/wav_sample_provider.cc
+@@ -43,6 +43,15 @@ namespace iamf_tools {
+ 
+ namespace {
+ 
++std::string PathToUtf8(const std::filesystem::path& path) {
++#if defined(__cpp_char8_t)
++  const auto value = path.u8string();
++  return std::string(reinterpret_cast<const char*>(value.data()), value.size());
++#else
++  return path.u8string();
++#endif
++}
++
+ void FillChannelIds(
+     const iamf_tools_cli_proto::AudioFrameObuMetadata& audio_frame_metadata,
+     std::vector<uint32_t>& channel_ids) {
+@@ -153,13 +162,14 @@ absl::StatusOr<WavSampleProvider> WavSampleProvider::Create(
+   absl::flat_hash_map<DecodedUleb128, std::vector<ChannelLabel::Label>>
+       audio_element_id_to_labels;
+ 
+-  const std::filesystem::path input_wav_directory_path(input_wav_directory);
++  const std::filesystem::path input_wav_directory_path =
++      std::filesystem::u8path(input_wav_directory);
+   for (const auto& audio_frame_obu_metadata : audio_frame_metadata) {
+     const uint32_t audio_element_id =
+         audio_frame_obu_metadata.audio_element_id();
+     const auto& wav_filename =
+         input_wav_directory_path /
+-        std::filesystem::path(audio_frame_obu_metadata.wav_filename());
++        std::filesystem::u8path(audio_frame_obu_metadata.wav_filename());
+ 
+     // Retrieve the Codec Config OBU for the audio element.
+     auto audio_element_iter = audio_elements.find(audio_element_id);
+@@ -188,7 +198,7 @@ absl::StatusOr<WavSampleProvider> WavSampleProvider::Create(
+     // the others will have an empty slot.
+ 
+     RETURN_IF_NOT_OK(InitializeForAudioElement(
+-        audio_element_id, audio_frame_obu_metadata, wav_filename.string(),
++        audio_element_id, audio_frame_obu_metadata, PathToUtf8(wav_filename),
+         *codec_config, channel_ids_iter->second,
+         audio_element_id_to_labels[audio_element_id], wav_readers));
+   }
+diff --git a/iamf/cli/wav_writer.cc b/iamf/cli/wav_writer.cc
+index cbc90e2..b8c12bf 100644
+--- a/iamf/cli/wav_writer.cc
++++ b/iamf/cli/wav_writer.cc
+@@ -17,6 +17,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
++#include <filesystem>
+ #include <memory>
+ #include <string>
+ #include <utility>
+@@ -127,7 +128,12 @@ std::unique_ptr<WavWriter> WavWriter::Create(const std::string& wav_filename,
+                                              bool write_header) {
+   // Open the file to write to.
+   ABSL_LOG(INFO) << "Writer \"" << wav_filename << "\"";
++#if defined(_WIN32)
++  const auto wav_path = std::filesystem::u8path(wav_filename);
++  auto* file = _wfopen(wav_path.c_str(), L"wb");
++#else
+   auto* file = std::fopen(wav_filename.c_str(), "wb");
++#endif
+   if (file == nullptr) {
+     ABSL_LOG(ERROR).WithPerror()
+         << "Error opening file \"" << wav_filename << "\"";
+@@ -150,7 +156,8 @@ std::unique_ptr<WavWriter> WavWriter::Create(const std::string& wav_filename,
+       ABSL_LOG(WARNING) << "This implementation does not support writing "
+                         << bit_depth << "-bit wav files.";
+       std::fclose(file);
+-      std::remove(wav_filename.c_str());
++      std::error_code error_code;
++      std::filesystem::remove(std::filesystem::u8path(wav_filename), error_code);
+       return nullptr;
+   }
+ 
+@@ -225,7 +232,8 @@ absl::Status WavWriter::WritePcmSamples(absl::Span<const uint8_t> buffer) {
+ 
+ void WavWriter::Abort() {
+   std::fclose(file_);
+-  std::remove(filename_to_remove_.c_str());
++  std::error_code error_code;
++  std::filesystem::remove(std::filesystem::u8path(filename_to_remove_), error_code);
+   file_ = nullptr;
+ }
+ 
+diff --git a/iamf/cli/encoder_inprocess_api.cc b/iamf/cli/encoder_inprocess_api.cc
+new file mode 100644
+--- /dev/null
++++ b/iamf/cli/encoder_inprocess_api.cc
+@@ -0,0 +1,285 @@
++#include "iamf_tools_encoder_api.h"
++
++#include <algorithm>
++#include <cstdint>
++#include <cstring>
++#include <exception>
++#include <filesystem>
++#include <fstream>
++#include <iterator>
++#include <mutex>
++#include <sstream>
++#include <string>
++#include <string_view>
++
++#include "absl/log/log_entry.h"
++#include "absl/log/globals.h"
++#include "absl/log/log_sink.h"
++#include "absl/log/log_sink_registry.h"
++#include "absl/status/status.h"
++#include "google/protobuf/text_format.h"
++#include "iamf/cli/encoder_main_lib.h"
++#include "iamf/cli/probe.h"
++#include "iamf/cli/proto/user_metadata.pb.h"
++
++#if defined(_WIN32)
++#define IAMF_TOOLS_ENCODER_EXPORT __declspec(dllexport)
++#elif defined(__GNUC__)
++#define IAMF_TOOLS_ENCODER_EXPORT __attribute__((visibility("default")))
++#else
++#define IAMF_TOOLS_ENCODER_EXPORT
++#endif
++
++namespace {
++
++void CopyMessage(char* destination, std::size_t capacity,
++                 std::string_view message) {
++  if (destination == nullptr || capacity == 0) return;
++  const std::size_t count = std::min(capacity - 1, message.size());
++  std::memcpy(destination, message.data(), count);
++  destination[count] = '\0';
++}
++
++std::string PathToUtf8(const std::filesystem::path& path) {
++#if defined(__cpp_char8_t)
++  const auto value = path.u8string();
++  return std::string(reinterpret_cast<const char*>(value.data()), value.size());
++#else
++  return path.u8string();
++#endif
++}
++
++class EncoderLogSink final : public absl::LogSink {
++ public:
++  explicit EncoderLogSink(const IamfToolsEncoderRunOptions& options)
++      : options_(options) {}
++
++  void Send(const absl::LogEntry& entry) override {
++    if (options_.log_callback == nullptr) return;
++    const auto text = entry.text_message_with_prefix_and_newline();
++    const std::string message(text.data(), text.size());
++    std::lock_guard<std::mutex> lock(mutex_);
++    options_.log_callback(static_cast<int>(entry.log_severity()),
++                          message.c_str(), options_.opaque);
++  }
++
++ private:
++  const IamfToolsEncoderRunOptions& options_;
++  std::mutex mutex_;
++};
++
++class ScopedLogSink final {
++ public:
++  explicit ScopedLogSink(absl::LogSink* sink) : sink_(sink) {
++    absl::AddLogSink(sink_);
++  }
++  ~ScopedLogSink() { absl::RemoveLogSink(sink_); }
++
++  ScopedLogSink(const ScopedLogSink&) = delete;
++  ScopedLogSink& operator=(const ScopedLogSink&) = delete;
++
++ private:
++  absl::LogSink* sink_;
++};
++
++std::mutex g_iamf_tools_execution_mutex;
++
++class ScopedProbeLogSilence final {
++ public:
++  ScopedProbeLogSilence()
++      : previous_min_(absl::MinLogLevel()),
++        previous_stderr_(absl::StderrThreshold()) {
++    absl::SetMinLogLevel(absl::LogSeverityAtLeast::kInfinity);
++    absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfinity);
++  }
++  ~ScopedProbeLogSilence() {
++    absl::SetMinLogLevel(previous_min_);
++    absl::SetStderrThreshold(previous_stderr_);
++  }
++
++  ScopedProbeLogSilence(const ScopedProbeLogSilence&) = delete;
++  ScopedProbeLogSilence& operator=(const ScopedProbeLogSilence&) = delete;
++
++ private:
++  absl::LogSeverityAtLeast previous_min_;
++  absl::LogSeverityAtLeast previous_stderr_;
++};
++
++}  // namespace
++
++extern "C" IAMF_TOOLS_ENCODER_EXPORT int iamf_tools_encoder_run(
++    const IamfToolsEncoderRunOptions* options, char* output_iamf_filename,
++    std::size_t output_iamf_filename_capacity, char* error_message,
++    std::size_t error_message_capacity) {
++  if (output_iamf_filename != nullptr && output_iamf_filename_capacity > 0) {
++    output_iamf_filename[0] = '\0';
++  }
++  if (error_message != nullptr && error_message_capacity > 0) {
++    error_message[0] = '\0';
++  }
++  const auto fail = [&](std::string_view message) {
++    CopyMessage(error_message, error_message_capacity, message);
++    return 1;
++  };
++
++  if (options == nullptr || options->user_metadata_filename == nullptr ||
++      options->input_wav_directory == nullptr ||
++      options->output_iamf_directory == nullptr) {
++    return fail("encoder options and all three input paths are required");
++  }
++  if (options->user_metadata_filename[0] == '\0' ||
++      options->input_wav_directory[0] == '\0' ||
++      options->output_iamf_directory[0] == '\0') {
++    return fail("metadata, input WAV, and output paths must not be empty");
++  }
++  if (output_iamf_filename == nullptr ||
++      output_iamf_filename_capacity == 0) {
++    return fail("output IAMF filename buffer is required");
++  }
++
++  try {
++    const std::filesystem::path metadata_path =
++        std::filesystem::u8path(options->user_metadata_filename);
++    std::ifstream metadata_file(metadata_path,
++                                std::ios::binary | std::ios::in);
++    if (!metadata_file) {
++      return fail("cannot open IAMF user metadata");
++    }
++
++    std::ostringstream metadata_stream;
++    metadata_stream << metadata_file.rdbuf();
++    const std::string serialized_metadata = metadata_stream.str();
++
++    iamf_tools_cli_proto::UserMetadata user_metadata;
++    bool parsed = false;
++    const auto extension = metadata_path.extension().string();
++    if (extension == ".binpb") {
++      parsed = user_metadata.ParseFromString(serialized_metadata);
++    } else if (extension == ".textproto" || extension == ".txtpb") {
++      parsed = google::protobuf::TextFormat::ParseFromString(
++          serialized_metadata, &user_metadata);
++    }
++    if (!parsed) {
++      return fail("cannot parse IAMF user metadata as textproto or binpb");
++    }
++
++    const std::string& output_prefix =
++        user_metadata.test_vector_metadata().file_name_prefix();
++    if (output_prefix.empty()) {
++      return fail("IAMF user metadata must set test_vector_metadata.file_name_prefix");
++    }
++
++    const std::filesystem::path output_path =
++        std::filesystem::u8path(options->output_iamf_directory) /
++        std::filesystem::u8path(output_prefix + ".iamf");
++    const std::string output_path_utf8 = PathToUtf8(output_path);
++    if (output_path_utf8.size() >= output_iamf_filename_capacity) {
++      return fail("output IAMF filename buffer is too small");
++    }
++
++    iamf_tools::EncoderRunOptions run_options;
++    if (options->cancellation_requested != nullptr) {
++      run_options.cancellation_requested = [options]() {
++        return options->cancellation_requested(options->opaque) != 0;
++      };
++    }
++
++    absl::Status status = absl::OkStatus();
++    {
++      std::lock_guard<std::mutex> execution_lock(g_iamf_tools_execution_mutex);
++      EncoderLogSink log_sink(*options);
++      ScopedLogSink scoped_log_sink(&log_sink);
++      status = iamf_tools::TestMain(user_metadata,
++                                    options->input_wav_directory,
++                                    options->output_iamf_directory,
++                                    run_options);
++    }
++    if (!status.ok()) {
++      return fail(status.ToString());
++    }
++
++    std::error_code filesystem_error;
++    if (!std::filesystem::is_regular_file(output_path, filesystem_error) ||
++        filesystem_error) {
++      return fail("official encoder completed without creating the IAMF output file");
++    }
++    std::memcpy(output_iamf_filename, output_path_utf8.c_str(),
++                output_path_utf8.size() + 1);
++    return 0;
++  } catch (const std::exception& exception) {
++    return fail(exception.what());
++  } catch (...) {
++    return fail("unknown error while running official IAMF encoder");
++  }
++}
++
++extern "C" IAMF_TOOLS_ENCODER_EXPORT int iamf_tools_probe_file(
++    const char* iamf_filename, std::size_t expected_descriptor_bytes,
++    std::uint32_t* temporal_unit_count, char* error_message,
++    std::size_t error_message_capacity) {
++  if (error_message != nullptr && error_message_capacity > 0) {
++    error_message[0] = '\0';
++  }
++  if (temporal_unit_count != nullptr) {
++    *temporal_unit_count = 0;
++  }
++  const auto fail = [&](std::string_view message, int result) {
++    CopyMessage(error_message, error_message_capacity, message);
++    return result;
++  };
++  if (iamf_filename == nullptr || iamf_filename[0] == '\0') {
++    return fail("IAMF filename is required", IAMF_TOOLS_PROBE_OPERATIONAL_ERROR);
++  }
++  try {
++    std::lock_guard<std::mutex> execution_lock(g_iamf_tools_execution_mutex);
++    ScopedProbeLogSilence silence;
++    iamf_tools::ProbeOptions options;
++    options.scan_mode = iamf_tools::ScanMode::kScanFull;
++    auto report_or = iamf_tools::ProbeFile(iamf_filename, options);
++    if (!report_or.ok()) {
++      const int result =
++          absl::IsInvalidArgument(report_or.status())
++              ? IAMF_TOOLS_PROBE_INVALID_IAMF
++              : IAMF_TOOLS_PROBE_OPERATIONAL_ERROR;
++      return fail(report_or.status().ToString(), result);
++    }
++    const auto& report = *report_or;
++    if (report.descriptor_bytes_consumed != expected_descriptor_bytes) {
++      return fail("MP4 IAMF descriptor bytes do not match the parsed IA sequence descriptors",
++                  IAMF_TOOLS_PROBE_INVALID_IAMF);
++    }
++    if (!report.temporal_unit_scan.has_value()) {
++      return fail("iamf-tools Probe did not return a temporal-unit scan",
++                  IAMF_TOOLS_PROBE_OPERATIONAL_ERROR);
++    }
++    const auto& scan = *report.temporal_unit_scan;
++    if (temporal_unit_count != nullptr) {
++      *temporal_unit_count = scan.temporal_unit_count;
++    }
++    if (scan.temporal_unit_count == 0 || scan.audio_frame_count == 0) {
++      return fail("IAMF stream has no complete temporal units or audio frames",
++                  IAMF_TOOLS_PROBE_INVALID_IAMF);
++    }
++    if (scan.audio_frame_parse_errors != 0 ||
++        scan.parameter_block_parse_errors != 0) {
++      return fail("IAMF stream contains malformed audio-frame or parameter OBUs",
++                  IAMF_TOOLS_PROBE_INVALID_IAMF);
++    }
++    if (scan.stopped_reason != "eof") {
++      const bool operational_failure =
++          scan.stopped_reason == "read_error" ||
++          scan.stopped_reason == "scan_budget_exceeded" ||
++          scan.stopped_reason == "cancelled";
++      return fail(std::string("IAMF scan stopped before end of stream: ") +
++                  scan.stopped_reason,
++                  operational_failure ? IAMF_TOOLS_PROBE_OPERATIONAL_ERROR
++                                      : IAMF_TOOLS_PROBE_INVALID_IAMF);
++    }
++    return IAMF_TOOLS_PROBE_SUCCESS;
++  } catch (const std::exception& exception) {
++    return fail(exception.what(), IAMF_TOOLS_PROBE_OPERATIONAL_ERROR);
++  } catch (...) {
++    return fail("unknown error while probing IAMF stream",
++                IAMF_TOOLS_PROBE_OPERATIONAL_ERROR);
++  }
++}
+diff --git a/iamf/cli/probe.cc b/iamf/cli/probe.cc
+index 46fe9e4f..f64ef381 100644
+--- a/iamf/cli/probe.cc
++++ b/iamf/cli/probe.cc
+@@ -1041,6 +1041,8 @@ void ScanTemporalUnits(
+           absl::StatusCode::kResourceExhausted) {
+         out.stopped_reason =
+             bytes_available_before_header == 0 ? "eof" : "truncated";
++      } else if (absl::IsUnavailable(header_metadata.status())) {
++        out.stopped_reason = "read_error";
+       } else {
+         out.stopped_reason = "malformed";
+       }
+@@ -1326,6 +1328,9 @@ absl::StatusOr<ProbeReport> ProbeFromBuffer(ReadBitBuffer& read_bit_buffer,
+           absl::StrCat("Insufficient data to parse descriptor OBUs: ",
+                        descriptors_or.status().message()));
+     }
++    if (absl::IsUnavailable(descriptors_or.status())) {
++      return descriptors_or.status();
++    }
+     return absl::InvalidArgumentError(
+         absl::StrCat("Failed to parse descriptor OBUs: ",
+                      descriptors_or.status().message()));
+diff --git a/iamf/common/read_bit_buffer.cc b/iamf/common/read_bit_buffer.cc
+index c8b3226f..e0971da1 100644
+--- a/iamf/common/read_bit_buffer.cc
++++ b/iamf/common/read_bit_buffer.cc
+@@ -478,6 +478,6 @@ absl::Status FileBasedReadBitBuffer::LoadBytesToBuffer(int64_t starting_byte,
+   source_ifs_.seekg(starting_byte);
+   source_ifs_.read(reinterpret_cast<char*>(bit_buffer_.data()), num_bytes);
+   if (!source_ifs_.good()) {
+-    return absl::InvalidArgumentError(
++    return absl::UnavailableError(
+         absl::StrCat("File reading failed. State= ", source_ifs_.rdstate()));
+   }
