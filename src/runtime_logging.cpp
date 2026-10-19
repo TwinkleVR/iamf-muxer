@@ -197,7 +197,7 @@ bool Initialize(const std::filesystem::path& executable_directory,
     }
 
     auto logger = std::make_shared<spdlog::logger>(kLoggerName, std::move(sink));
-    logger->set_level(spdlog::level::trace);
+    logger->set_level(spdlog::level::debug);
     logger->set_pattern("[%H:%M:%S.%e] [thread=%t] [%^%L%$] [%s:%#] %v");
     logger->flush_on(spdlog::level::warn);
     logger->set_error_handler([](const std::string& message) {

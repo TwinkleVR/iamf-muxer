@@ -33,28 +33,6 @@ constexpr uint64_t kMaxMovieBoxSize = 256ULL * 1024ULL * 1024ULL;
 std::once_flag g_install_log_callback;
 thread_local bool g_suppress_ffmpeg_logs = false;
 
-bool IsVerboseMovSampleTraceNoise(const char* context_name, int level,
-                                  const std::string& message) {
-    if (level <= AV_LOG_VERBOSE || context_name == nullptr ||
-        std::strcmp(context_name, "AVFormatContext") != 0)
-        return false;
-
-    const std::size_t mov_context_start = message.find("[mov,");
-    if (mov_context_start == std::string::npos)
-        return false;
-    const std::size_t message_start = message.find("] ", mov_context_start);
-    if (message_start == std::string::npos)
-        return false;
-
-    const std::size_t body_start = message_start + 2;
-    const bool is_ctts_run = message.compare(body_start, 6, "count=") == 0 &&
-                             message.find(", duration=", body_start) != std::string::npos;
-    const bool is_stts_ctts_summary = message.compare(body_start, 5, "stts:") == 0 &&
-                                      message.find(" ctts:", body_start) != std::string::npos;
-    const bool is_av_index_entry = message.compare(body_start, 15, "AVIndex stream ") == 0;
-    return is_ctts_run || is_stts_ctts_summary || is_av_index_entry;
-}
-
 void FilterFfmpegLog(void* context, int level, const char* format, va_list arguments) {
     try {
         std::array<char, 8192> message_buffer{};
@@ -73,20 +51,18 @@ void FilterFfmpegLog(void* context, int level, const char* format, va_list argum
             if (formatted_size >= static_cast<int>(message_buffer.size() - 1))
                 message += " [... FFmpeg log line truncated]";
             const char* context_name = context == nullptr ? "global" : av_default_item_name(context);
-            if (!IsVerboseMovSampleTraceNoise(context_name, level, message)) {
-                if (auto logger = logging::GetLogger()) {
-                    spdlog::level::level_enum log_level = spdlog::level::trace;
-                    if (level <= AV_LOG_ERROR)
-                        log_level = spdlog::level::err;
-                    else if (level <= AV_LOG_WARNING)
-                        log_level = spdlog::level::warn;
-                    else if (level <= AV_LOG_INFO)
-                        log_level = spdlog::level::info;
-                    else if (level <= AV_LOG_VERBOSE)
-                        log_level = spdlog::level::debug;
-                    logger->log(spdlog::source_loc{__FILE__, __LINE__, __func__}, log_level,
-                                "[FFmpeg][{}] {}", context_name, message);
-                }
+            if (auto logger = logging::GetLogger()) {
+                spdlog::level::level_enum log_level = spdlog::level::trace;
+                if (level <= AV_LOG_ERROR)
+                    log_level = spdlog::level::err;
+                else if (level <= AV_LOG_WARNING)
+                    log_level = spdlog::level::warn;
+                else if (level <= AV_LOG_INFO)
+                    log_level = spdlog::level::info;
+                else if (level <= AV_LOG_DEBUG)
+                    log_level = spdlog::level::debug;
+                logger->log(spdlog::source_loc{__FILE__, __LINE__, __func__}, log_level,
+                            "[FFmpeg][{}] {}", context_name, message);
             }
         }
     } catch (...) {

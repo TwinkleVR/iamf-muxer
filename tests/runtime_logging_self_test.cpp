@@ -87,28 +87,15 @@ int main() {
         if (run == 0) {
             first_log_path = current_log_path;
             IAMF_MUX_LOG_DEBUG("[SelfTest] debug severity marker");
+            IAMF_MUX_LOG_TRACE("[SelfTest] application trace diagnostic marker");
             IAMF_MUX_LOG_INFO("[SelfTest] UTF-8 caf\xc3\xa9 marker");
             IAMF_MUX_LOG_WARN("[SelfTest] warning severity marker");
             IAMF_MUX_LOG_ERROR("[SelfTest] error severity marker");
             immersive_audio_muxer::avformat_input::InitializeFfmpegLogging();
             av_log(nullptr, AV_LOG_INFO, "[SelfTest] FFmpeg callback message %d\n", 17);
             av_log_set_level(AV_LOG_TRACE);
-            AVFormatContext* mov_context = avformat_alloc_context();
-            if (!Expect(mov_context != nullptr, "cannot allocate FFmpeg test context")) {
-                immersive_audio_muxer::logging::Shutdown();
-                return 1;
-            }
-            av_log(mov_context, AV_LOG_TRACE,
-                   "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] count=1, duration=1024\n");
-            av_log(mov_context, AV_LOG_TRACE,
-                   "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] count=1, duration=1536\n");
-            av_log(mov_context, AV_LOG_TRACE,
-                   "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] stts: 351232 ctts: 1536, tts_index: 686\n");
-            av_log(mov_context, AV_LOG_TRACE,
-                   "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] AVIndex stream 0, sample 272, offset 3f4f991\n");
-            av_log(mov_context, AV_LOG_TRACE,
-                   "[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] retained trace diagnostic marker\n");
-            avformat_free_context(mov_context);
+            av_log(nullptr, AV_LOG_DEBUG, "[SelfTest] FFmpeg DEBUG marker\n");
+            av_log(nullptr, AV_LOG_TRACE, "[SelfTest] FFmpeg TRACE marker\n");
 
             std::vector<std::thread> writers;
             for (int thread_index = 0; thread_index < 4; ++thread_index) {
@@ -132,14 +119,13 @@ int main() {
             if (!Expect(log_contents.find("FFmpeg callback message 17") != std::string::npos,
                         "FFmpeg callback message was not written"))
                 return 1;
-            if (!Expect(log_contents.find("count=1, duration=") == std::string::npos &&
-                            log_contents.find("stts: 351232 ctts:") == std::string::npos &&
-                            log_contents.find("AVIndex stream ") == std::string::npos,
-                        "noisy MOV sample-table and index messages were not filtered"))
+            if (!Expect(log_contents.find("FFmpeg DEBUG marker") != std::string::npos,
+                        "FFmpeg DEBUG diagnostic was not written"))
                 return 1;
-            if (!Expect(log_contents.find("retained trace diagnostic marker") != std::string::npos &&
-                            log_contents.find("[T]") != std::string::npos,
-                        "unrelated FFmpeg trace diagnostics were filtered"))
+            if (!Expect(log_contents.find("application trace diagnostic marker") == std::string::npos &&
+                            log_contents.find("FFmpeg TRACE marker") == std::string::npos &&
+                            log_contents.find("[T]") == std::string::npos,
+                        "TRACE-level messages were written to the log"))
                 return 1;
             if (!Expect(log_contents.find("[thread=") != std::string::npos,
                         "thread identifier is missing from the log pattern"))
