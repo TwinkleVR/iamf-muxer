@@ -277,7 +277,8 @@ ApplicationWindow {
                 return
             const path = window.localPathFromUrl(selectedFile)
             window.rememberInputFileFolder(targetSlot, path)
-            guiController.clearInput(targetSlot)
+            if (targetSlot !== "headlocked")
+                guiController.clearInput(targetSlot)
             if (!guiController.addInputFile(path, targetSlot))
                 inputErrorSound.play()
         }
@@ -1555,8 +1556,10 @@ ApplicationWindow {
                                     enabled: !guiController.jobRunning
                                     opacity: enabled ? 1.0 : 0.48
                                     color: "#0e0e0e"
-                                    border.width: headInfoHover.hovered ? 2 : 1
-                                    border.color: headInfoHover.hovered ? "#8fcf9a" : "#5f9668"
+                                    border.width: headInfoDropArea.compatibleDrag || headInfoHover.hovered ? 2 : 1
+                                    border.color: headInfoDropArea.compatibleDrag
+                                                 ? "#d0d0d0"
+                                                 : (headInfoHover.hovered ? "#8fcf9a" : "#5f9668")
                                     radius: 4
 
                                     HoverHandler {
@@ -1566,6 +1569,23 @@ ApplicationWindow {
                                     TapHandler {
                                         acceptedButtons: Qt.LeftButton
                                         onTapped: window.browseInput("headlocked")
+                                    }
+
+                                    DropArea {
+                                        id: headInfoDropArea
+                                        property bool compatibleDrag: false
+                                        anchors.fill: parent
+                                        onEntered: function(drag) {
+                                            compatibleDrag = window.canAcceptDrag(drag, "headlocked")
+                                            drag.accepted = window.canReceiveDrop(drag)
+                                        }
+                                        onExited: compatibleDrag = false
+                                        onDropped: function(drop) {
+                                            drop.accepted = window.canReceiveDrop(drop)
+                                            if (drop.accepted)
+                                                window.sendDrop(drop, "headlocked")
+                                            compatibleDrag = false
+                                        }
                                     }
 
                                     Button {

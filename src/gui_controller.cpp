@@ -823,7 +823,8 @@ bool GuiController::SetSpatialAudioInput(const app::MediaProbeInfo& info, QStrin
     return true;
 }
 
-bool GuiController::SetHeadLockedStereoInput(const app::MediaProbeInfo& info, QString* error) {
+bool GuiController::SetHeadLockedStereoInput(const app::MediaProbeInfo& info, QString* error,
+                                             bool replace_existing) {
     if (!ambisonicsMode()) {
         if (error)
             *error = QStringLiteral("Head-Locked Stereo Audio is available only in Ambisonics mode.");
@@ -834,7 +835,7 @@ bool GuiController::SetHeadLockedStereoInput(const app::MediaProbeInfo& info, QS
             *error = QStringLiteral("Head-Locked Stereo Audio must contain exactly two channels.");
         return false;
     }
-    if (head_locked_stereo_) {
+    if (head_locked_stereo_ && !replace_existing) {
         if (error)
             *error = QStringLiteral("A Head-Locked Stereo input is already configured. Clear it first.");
         return false;
@@ -850,7 +851,7 @@ bool GuiController::AddProbedInput(const app::MediaProbeInfo& info, const QStrin
     if (slot == QStringLiteral("spatial"))
         return SetSpatialAudioInput(info, error, replace_existing);
     if (slot == QStringLiteral("headlocked"))
-        return SetHeadLockedStereoInput(info, error);
+        return SetHeadLockedStereoInput(info, error, replace_existing);
     if (slot != QStringLiteral("auto")) {
         if (error)
             *error = SlotError(slot);
@@ -964,7 +965,8 @@ bool GuiController::addInputFile(const QString& path, const QString& slot) {
     QString slot_error;
     const QString normalized_slot = slot.toLower();
     const bool replace_existing = normalized_slot == QStringLiteral("video") ||
-                                  normalized_slot == QStringLiteral("spatial");
+                                  normalized_slot == QStringLiteral("spatial") ||
+                                  normalized_slot == QStringLiteral("headlocked");
     if (!AddProbedInput(info, normalized_slot, &slot_error, replace_existing)) {
         SetStatus(slot_error);
         IAMF_MUX_LOG_ERROR("[GUI] input could not be assigned to slot {}: path={} error={}",
@@ -989,7 +991,8 @@ bool GuiController::addInputFilesToSlot(const QStringList& paths, const QString&
 
     int failed_count = 0;
     for (const QString& path : paths) {
-        clearInput(slot);
+        if (slot.toLower() != QStringLiteral("headlocked"))
+            clearInput(slot);
         if (!addInputFile(path, slot))
             ++failed_count;
     }

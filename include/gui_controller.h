@@ -131,7 +131,8 @@ private:
     void StartAudioEncodingMux(bool channel_based);
     void StartBackgroundJob(std::function<bool(std::string*)> operation,
                            const QString& start_status);
-    bool SetHeadLockedStereoInput(const app::MediaProbeInfo& info, QString* error);
+    bool SetHeadLockedStereoInput(const app::MediaProbeInfo& info, QString* error,
+                                  bool replace_existing = false);
     void RecalculateProject();
     void UpdateAutomaticOutputPath();
     std::filesystem::path SuggestedOutputPath() const;
