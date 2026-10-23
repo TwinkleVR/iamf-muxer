@@ -1,5 +1,5 @@
 diff --git a/iamf/cli/encoder_main_lib.cc b/iamf/cli/encoder_main_lib.cc
-index 7e0b7ef..0c9e0c8 100644
+index 7e0b7ef..5129546 100644
 --- a/iamf/cli/encoder_main_lib.cc
 +++ b/iamf/cli/encoder_main_lib.cc
 @@ -36,6 +36,8 @@
@@ -27,7 +27,20 @@ index 7e0b7ef..0c9e0c8 100644
  absl::Status PartitionParameterMetadata(UserMetadata& user_metadata) {
    uint32_t partition_duration = 0;
    if (user_metadata.ia_sequence_header_metadata().empty() ||
-@@ -113,14 +124,16 @@ absl::Status CollectLabeledSamplesForAudioElements(
+@@ -104,23 +115,28 @@ absl::Status CollectLabeledSamplesForAudioElements(
+     WavSampleProvider& wav_sample_provider,
+     absl::flat_hash_map<DecodedUleb128, LabelSamplesMap>& id_to_labeled_samples,
+     bool& no_more_real_samples) {
++  no_more_real_samples = true;
+   for (const auto& [audio_element_id, unused_audio_element] : audio_elements) {
++    bool finished_reading = false;
+     RETURN_IF_NOT_OK(wav_sample_provider.ReadFrames(
+         audio_element_id, id_to_labeled_samples[audio_element_id],
+-        no_more_real_samples));
++        finished_reading));
++    no_more_real_samples = no_more_real_samples && finished_reading;
+   }
+   return absl::OkStatus();
  }
  
  absl::Status CreateOutputDirectory(const std::string& output_directory) {
@@ -47,7 +60,7 @@ index 7e0b7ef..0c9e0c8 100644
      return absl::UnknownError(
          absl::StrCat("Failed to create output directory = ", output_directory));
    }
-@@ -156,10 +169,22 @@ absl::Status LabeledSamplesToAudioElementData(
+@@ -156,10 +172,22 @@ absl::Status LabeledSamplesToAudioElementData(
  
  absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
                                        const std::string& input_wav_directory,
@@ -72,7 +85,7 @@ index 7e0b7ef..0c9e0c8 100644
    if (!wav_sample_provider.ok()) {
      return wav_sample_provider.status();
    }
-@@ -177,6 +202,9 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+@@ -177,6 +205,9 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
    // slots in the inner maps; we can reuse them.
    api::IamfTemporalUnitData temporal_unit_data;
    while (iamf_encoder.GeneratingTemporalUnits()) {
@@ -82,7 +95,7 @@ index 7e0b7ef..0c9e0c8 100644
      ABSL_LOG_EVERY_N_SEC(INFO, 5)
          << "\n\n============================= Generating Temporal Units Iter #"
          << temporal_unit_iteration++ << " =============================\n";
-@@ -188,8 +216,8 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+@@ -188,8 +219,8 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
      absl::flat_hash_map<DecodedUleb128, LabelSamplesMap> id_to_labeled_samples;
      bool no_more_real_samples = false;
      RETURN_IF_NOT_OK(CollectLabeledSamplesForAudioElements(
@@ -93,7 +106,7 @@ index 7e0b7ef..0c9e0c8 100644
  
      // Adapt the audio samples into the expected format for the encoder.
      for (const auto& [audio_element_id, labeled_samples] :
-@@ -231,6 +259,10 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+@@ -231,6 +262,10 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
      std::vector<uint8_t> unused_temporal_unit_obus;
      RETURN_IF_NOT_OK(
          iamf_encoder.OutputTemporalUnit(unused_temporal_unit_obus));
@@ -104,7 +117,7 @@ index 7e0b7ef..0c9e0c8 100644
    }
    ABSL_LOG(INFO)
        << "\n============================= END of Generating Data OBUs"
-@@ -244,6 +276,14 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
+@@ -244,6 +279,14 @@ absl::Status GenerateTemporalUnitObus(const UserMetadata& user_metadata,
  absl::Status TestMain(const UserMetadata& input_user_metadata,
                        const std::string& input_wav_directory,
                        const std::string& output_iamf_directory) {
@@ -119,7 +132,7 @@ index 7e0b7ef..0c9e0c8 100644
    // Make a copy before modifying.
    UserMetadata user_metadata(input_user_metadata);
  
-@@ -259,10 +299,10 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
+@@ -259,10 +302,10 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
  
    // Write the output audio streams which were used to measure loudness to the
    // same directory as the IAMF file.
@@ -134,7 +147,7 @@ index 7e0b7ef..0c9e0c8 100644
    ABSL_LOG(INFO) << "output_wav_file_prefix = " << output_wav_file_prefix;
    RenderingMixPresentationFinalizer::SampleProcessorFactory
        sample_processor_factory =
-@@ -308,7 +348,7 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
+@@ -308,7 +351,7 @@ absl::Status TestMain(const UserMetadata& input_user_metadata,
    // Push all audio data to the encoder, at the end, the file is closed and
    // finalized.
    RETURN_IF_NOT_OK(GenerateTemporalUnitObus(user_metadata, input_wav_directory,

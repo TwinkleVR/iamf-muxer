@@ -155,6 +155,29 @@ QString FormatDuration(int64_t duration_ms) {
         .arg(milliseconds, 3, 10, QChar('0'));
 }
 
+QString UserFacingJobError(const std::string& error) {
+    if (error.find("Global timestamp has no value") != std::string::npos) {
+        return QStringLiteral(
+            "The audio inputs are out of sync. Use Ambisonics and Head-Locked Stereo files with matching durations, then try again.");
+    }
+
+    const std::size_t first_line_end = error.find_first_of("\r\n");
+    const std::size_t first_line_length = first_line_end == std::string::npos
+                                              ? error.size()
+                                              : first_line_end;
+    QString summary = QString::fromUtf8(error.data(), static_cast<qsizetype>(first_line_length)).simplified();
+    if (summary.startsWith(QStringLiteral("in-process official iamf-tools encoder failed"),
+                           Qt::CaseInsensitive)) {
+        return QStringLiteral("The official IAMF encoder could not complete encoding. See the application log for details.");
+    }
+    if (summary.isEmpty())
+        summary = QStringLiteral("The conversion failed.");
+    constexpr qsizetype kMaximumSummaryLength = 180;
+    if (summary.size() > kMaximumSummaryLength)
+        summary = summary.left(kMaximumSummaryLength - 1).trimmed() + QChar(0x2026);
+    return summary + QStringLiteral(" See the application log for details.");
+}
+
 QString ChannelLayoutTitle(app::ChannelLayout layout) {
     if (layout == app::ChannelLayout::kMono)
         return QStringLiteral("Mono");
@@ -1122,7 +1145,7 @@ void GuiController::StartBackgroundJob(std::function<bool(std::string*)> operati
         } else if (cancelled) {
             message = QStringLiteral("IAMF MP4 mux cancelled.");
         } else {
-            message = QStringLiteral("IAMF MP4 mux failed: ") + QString::fromUtf8(error.c_str());
+            message = QStringLiteral("IAMF MP4 mux failed: ") + UserFacingJobError(error);
         }
         QMetaObject::invokeMethod(this, [this, success, message]() {
             if (worker_.joinable())
