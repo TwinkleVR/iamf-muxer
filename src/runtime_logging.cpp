@@ -4,7 +4,6 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -27,7 +26,6 @@ constexpr char kLoggerName[] = "immersive_audio_muxer";
 constexpr char kLogFilePrefix[] = "iamf_muxer_";
 std::mutex g_runtime_mutex;
 std::filesystem::path g_current_log_path;
-std::atomic_uint64_t g_run_sequence{0};
 
 void WriteToDebugOutput(const std::string& message) noexcept {
 #if defined(_WIN32)
@@ -65,8 +63,6 @@ spdlog::filename_t NativeFilename(const std::filesystem::path& path) {
 
 std::filesystem::path MakeRunLogPath(const std::filesystem::path& directory) {
     const auto now = std::chrono::system_clock::now();
-    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()).count();
     const std::time_t time = std::chrono::system_clock::to_time_t(now);
     std::tm local_time{};
 #if defined(_WIN32)
@@ -76,10 +72,7 @@ std::filesystem::path MakeRunLogPath(const std::filesystem::path& directory) {
 #endif
     std::ostringstream filename;
     filename << kLogFilePrefix << std::put_time(&local_time, "%Y%m%d_%H%M%S_")
-             << std::setw(3) << std::setfill('0') << (milliseconds % 1000)
-             << '_' << CurrentProcessId() << '_'
-             << std::setw(10)
-             << g_run_sequence.fetch_add(1, std::memory_order_relaxed) + 1 << ".log";
+             << CurrentProcessId() << ".log";
     return directory / filename.str();
 }
 
