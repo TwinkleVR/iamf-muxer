@@ -294,7 +294,7 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
   endif()
 
   set(_iamf_tools_terminal_options)
-  if(WIN32 AND CMAKE_GENERATOR MATCHES "Ninja")
+  if(CMAKE_GENERATOR MATCHES "Ninja")
     # Let nested Ninja steps stream progress through the outer build.
     list(APPEND _iamf_tools_terminal_options
       USES_TERMINAL_CONFIGURE TRUE
