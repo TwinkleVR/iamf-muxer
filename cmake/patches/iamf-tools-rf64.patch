@@ -1,0 +1,12 @@
+diff --git a/iamf/cli/wav_reader.h b/iamf/cli/wav_reader.h
+--- a/iamf/cli/wav_reader.h
++++ b/iamf/cli/wav_reader.h
+@@ -67,7 +67,7 @@
+   /*!\brief Gets the number of remaining samples in the file.
+    *
+    * \return Number of samples remaining to be read.
+    */
+-  int remaining_samples() const { return info_.remaining_samples; }
++  size_t remaining_samples() const { return info_.remaining_samples; }
+ 
+   /*!\brief Read up to one frame worth of samples.

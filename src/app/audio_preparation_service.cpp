@@ -58,19 +58,76 @@ bool WriteU32(std::ofstream* output, uint32_t value) {
     return output->good();
 }
 
-bool WriteWavHeader(std::ofstream* output, int sample_rate, int channels, uint32_t data_bytes) {
+bool WriteU64(std::ofstream* output, uint64_t value) {
+    const char bytes[8] = {static_cast<char>(value & 0xff),
+                           static_cast<char>((value >> 8) & 0xff),
+                           static_cast<char>((value >> 16) & 0xff),
+                           static_cast<char>((value >> 24) & 0xff),
+                           static_cast<char>((value >> 32) & 0xff),
+                           static_cast<char>((value >> 40) & 0xff),
+                           static_cast<char>((value >> 48) & 0xff),
+                           static_cast<char>((value >> 56) & 0xff)};
+    output->write(bytes, sizeof(bytes));
+    return output->good();
+}
+
+constexpr uint64_t kWavHeaderRiffBytes = 72;
+constexpr uint32_t kReservedDs64ChunkBytes = 28;
+constexpr std::streamoff kWavDataSizeOffset = 76;
+
+bool WriteWavHeader(std::ofstream* output, int sample_rate, int channels) {
     const uint32_t byte_rate = static_cast<uint32_t>(sample_rate) * static_cast<uint32_t>(channels) * 2;
     const uint16_t block_align = static_cast<uint16_t>(channels * 2);
     output->write("RIFF", 4);
-    if (!WriteU32(output, 36u + data_bytes))
+    if (!WriteU32(output, 0))
         return false;
-    output->write("WAVEfmt ", 8);
+    output->write("WAVEJUNK", 8);
+    if (!WriteU32(output, kReservedDs64ChunkBytes))
+        return false;
+    // Reserve a ds64-sized JUNK chunk so the header can be finalized as RF64.
+    const char reserved_ds64[kReservedDs64ChunkBytes] = {};
+    output->write(reserved_ds64, sizeof(reserved_ds64));
+    output->write("fmt ", 4);
     if (!WriteU32(output, 16) || !WriteU16(output, 1) || !WriteU16(output, static_cast<uint16_t>(channels)) ||
         !WriteU32(output, static_cast<uint32_t>(sample_rate)) || !WriteU32(output, byte_rate) ||
         !WriteU16(output, block_align) || !WriteU16(output, 16))
         return false;
     output->write("data", 4);
-    return WriteU32(output, data_bytes);
+    return WriteU32(output, 0);
+}
+
+bool FinalizeWavHeader(std::ofstream* output, int channels, uint64_t data_bytes) {
+    if (channels <= 0 || data_bytes % (static_cast<uint64_t>(channels) * 2) != 0 ||
+        data_bytes > std::numeric_limits<uint64_t>::max() - kWavHeaderRiffBytes) {
+        return false;
+    }
+
+    const uint64_t riff_size = kWavHeaderRiffBytes + data_bytes;
+    const uint64_t sample_count = data_bytes / (static_cast<uint64_t>(channels) * 2);
+    const uint64_t max_classic_data_bytes =
+        static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - kWavHeaderRiffBytes;
+    if (data_bytes <= max_classic_data_bytes) {
+        if (!output->seekp(0, std::ios::beg))
+            return false;
+        output->write("RIFF", 4);
+        if (!output->good() || !WriteU32(output, static_cast<uint32_t>(riff_size)) ||
+            !output->seekp(kWavDataSizeOffset, std::ios::beg))
+            return false;
+        return WriteU32(output, static_cast<uint32_t>(data_bytes));
+    }
+
+    if (!output->seekp(0, std::ios::beg))
+        return false;
+    output->write("RF64", 4);
+    if (!output->good() || !WriteU32(output, std::numeric_limits<uint32_t>::max()) ||
+        !output->seekp(12, std::ios::beg))
+        return false;
+    output->write("ds64", 4);
+    if (!output->good() || !WriteU32(output, kReservedDs64ChunkBytes) || !WriteU64(output, riff_size) ||
+        !WriteU64(output, data_bytes) || !WriteU64(output, sample_count) || !WriteU32(output, 0) ||
+        !output->seekp(kWavDataSizeOffset, std::ios::beg))
+        return false;
+    return WriteU32(output, std::numeric_limits<uint32_t>::max());
 }
 
 struct FormatContextCloser {
@@ -98,8 +155,9 @@ bool WriteSamples(std::ofstream* output, const uint8_t* data, int samples, int c
     if (samples <= 0)
         return true;
     const uint64_t bytes = static_cast<uint64_t>(samples) * static_cast<uint64_t>(channels) * 2;
-    if (bytes > std::numeric_limits<uint32_t>::max() - *bytes_written) {
-        SetError(error, "prepared WAV exceeds the classic RIFF 4 GiB limit");
+    if (bytes > std::numeric_limits<uint64_t>::max() - *bytes_written ||
+        bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+        SetError(error, "prepared WAV exceeds the supported RF64 size limit");
         return false;
     }
     output->write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(bytes));
@@ -294,7 +352,7 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
         }
     }
     std::ofstream output(options.output_wav_path, std::ios::binary | std::ios::trunc);
-    if (!output || !WriteWavHeader(&output, options.output_sample_rate, output_channels, 0)) {
+    if (!output || !WriteWavHeader(&output, options.output_sample_rate, output_channels)) {
         SetError(error, "cannot create prepared WAV: " + options.output_wav_path.u8string());
         return false;
     }
@@ -401,8 +459,7 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
         if (!WriteSamples(&output, samples_to_write, flushed_samples, output_channels, &data_bytes, error))
             return false;
     }
-    if (!output.seekp(4, std::ios::beg) || !WriteU32(&output, 36u + static_cast<uint32_t>(data_bytes)) ||
-        !output.seekp(40, std::ios::beg) || !WriteU32(&output, static_cast<uint32_t>(data_bytes))) {
+    if (!FinalizeWavHeader(&output, output_channels, data_bytes)) {
         SetError(error, "failed to finalize prepared WAV header");
         return false;
     }

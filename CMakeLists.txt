@@ -43,6 +43,7 @@ endif()
 FetchContent_Declare(spdlog
   GIT_REPOSITORY https://github.com/gabime/spdlog.git
   GIT_TAG "v${IMMERSIVE_AUDIO_MUXER_SPDLOG_VERSION}"
+  GIT_SUBMODULES ""
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(spdlog)
 
@@ -76,6 +77,9 @@ set(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_INPROCESS_PATCH
 set(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_COMPAT_PATCH
     "${CMAKE_SOURCE_DIR}/cmake/patches/iamf-tools-compat.patch"
     CACHE FILEPATH "Compiler compatibility patch for official iamf-tools")
+set(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_RF64_PATCH
+    "${CMAKE_SOURCE_DIR}/cmake/patches/iamf-tools-rf64.patch"
+    CACHE FILEPATH "RF64 WAV support patch for official iamf-tools")
 set(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_CMAKE_BUILD_DIR "" CACHE PATH
     "Separate CMake build directory for official iamf-tools")
 set(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_BUILD_CONFIG "" CACHE STRING
@@ -205,6 +209,18 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
     message(FATAL_ERROR
       "iamf-tools compatibility patch does not exist: ${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_COMPAT_PATCH}")
   endif()
+  if(NOT EXISTS "${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_RF64_PATCH}")
+    message(FATAL_ERROR
+      "iamf-tools RF64 patch does not exist: ${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_RF64_PATCH}")
+  endif()
+  set(_audio_to_tactile_rf64_patch
+      "${CMAKE_SOURCE_DIR}/cmake/patches/audio-to-tactile-rf64.patch")
+  set(_audio_to_tactile_patch_script
+      "${CMAKE_SOURCE_DIR}/cmake/apply_audio_to_tactile_rf64_patch.cmake")
+  if(NOT EXISTS "${_audio_to_tactile_rf64_patch}" OR
+     NOT EXISTS "${_audio_to_tactile_patch_script}")
+    message(FATAL_ERROR "audio-to-tactile RF64/Wave64 patch or helper script is missing")
+  endif()
   set(_iamf_tools_download_command "")
   if(_iamf_tools_managed_source)
     set(_iamf_tools_download_command
@@ -220,7 +236,10 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
     "-DIAMF_TOOLS_BUILD_SHARED=OFF"
     "-DIAMF_TOOLS_BUILD_CLI=OFF"
     "-DIAMF_TOOLS_BUILD_INPROCESS_ENCODER=ON"
-    "-DIMMERSIVE_AUDIO_MUXER_API_INCLUDE_DIR=${CMAKE_SOURCE_DIR}/include")
+    "-DIMMERSIVE_AUDIO_MUXER_API_INCLUDE_DIR=${CMAKE_SOURCE_DIR}/include"
+    "-DIMMERSIVE_AUDIO_MUXER_AUDIO_TO_TACTILE_RF64_PATCH=${_audio_to_tactile_rf64_patch}"
+    "-DIMMERSIVE_AUDIO_MUXER_AUDIO_TO_TACTILE_PATCH_SCRIPT=${_audio_to_tactile_patch_script}"
+    "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}")
   if(MINGW AND CMAKE_GENERATOR MATCHES "Ninja")
     list(APPEND _iamf_tools_configure_args
       "-DCMAKE_JOB_POOLS=iamf_mp4_link=1"
@@ -250,7 +269,7 @@ if(IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_FETCH_OFFICIAL)
     set(_iamf_tools_patch_command
       "${CMAKE_COMMAND}"
       "-DSOURCE_DIR=${_iamf_tools_source_dir}"
-      "-DPATCH_FILES=${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_CMAKE_PATCH}|${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_INPROCESS_PATCH}|${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_COMPAT_PATCH}"
+      "-DPATCH_FILES=${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_CMAKE_PATCH}|${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_INPROCESS_PATCH}|${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_COMPAT_PATCH}|${IMMERSIVE_AUDIO_MUXER_IAMF_TOOLS_RF64_PATCH}"
       "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
       -P "${_iamf_tools_patches_script}")
   endif()
