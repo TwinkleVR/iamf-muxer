@@ -632,6 +632,16 @@ if(IMMERSIVE_AUDIO_MUXER_BUILD_TESTS)
   target_compile_features(immersive_audio_muxer_project_model_test PRIVATE cxx_std_17)
   add_test(NAME immersive_audio_muxer_project_model_test
            COMMAND immersive_audio_muxer_project_model_test)
+  add_executable(immersive_audio_muxer_audio_preparation_test
+    tests/audio_preparation_self_test.cpp)
+  set_target_properties(immersive_audio_muxer_audio_preparation_test PROPERTIES
+    OUTPUT_NAME "iamf_muxer_audio_preparation_test")
+  target_link_libraries(immersive_audio_muxer_audio_preparation_test PRIVATE
+    immersive_audio_muxer_app)
+  target_compile_features(immersive_audio_muxer_audio_preparation_test PRIVATE cxx_std_17)
+  add_test(NAME immersive_audio_muxer_audio_preparation_test
+    COMMAND immersive_audio_muxer_audio_preparation_test
+      "${CMAKE_CURRENT_BINARY_DIR}/audio_preparation_bit_depth_test_data")
   add_executable(immersive_audio_muxer_atomic_output_transaction_test
     tests/atomic_output_transaction_self_test.cpp)
   set_target_properties(immersive_audio_muxer_atomic_output_transaction_test PROPERTIES

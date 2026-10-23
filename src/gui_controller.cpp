@@ -1304,6 +1304,7 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
                                      const std::filesystem::path& output_path,
                                      const QString& label,
                                      const std::vector<int>* output_channel_to_input,
+                                     int target_pcm_bit_depth,
                                      app::PreparedAudioInfo* prepared) {
                 post_status(QStringLiteral("Preparing ") + label + QStringLiteral(" audio..."));
                 app::AudioPreparationOptions options;
@@ -1312,6 +1313,10 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
                     options.stream_index = stream->index;
                 options.output_wav_path = output_path;
                 options.output_sample_rate = 48000;
+                options.precision_policy = generated_codec == 2
+                                               ? app::AudioPreparationPrecisionPolicy::kForcePcmS16
+                                               : app::AudioPreparationPrecisionPolicy::kPreserveSource;
+                options.target_pcm_bit_depth = target_pcm_bit_depth;
                 options.preserve_unspecified_channel_order = channel_based;
                 if (output_channel_to_input != nullptr)
                     options.output_channel_to_input = *output_channel_to_input;
@@ -1333,15 +1338,35 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
             if (!prepare_audio(primary_input, primary_wav,
                                channel_based ? QStringLiteral("Channel-based")
                                              : QStringLiteral("Ambisonics"),
-                               channel_based ? &channel_order : nullptr, &prepared_primary))
+                               channel_based ? &channel_order : nullptr, 0, &prepared_primary))
                 return false;
             std::optional<app::PreparedAudioInfo> prepared_head_locked;
+            const std::filesystem::path head_locked_wav = audio_directory / "head_locked_stereo.wav";
             if (head_locked_input) {
                 prepared_head_locked.emplace();
-                if (!prepare_audio(*head_locked_input, audio_directory / "head_locked_stereo.wav",
-                                   QStringLiteral("Head-Locked Stereo"), nullptr,
+                if (!prepare_audio(*head_locked_input, head_locked_wav,
+                                   QStringLiteral("Head-Locked Stereo"), nullptr, 0,
                                    &*prepared_head_locked))
                     return false;
+            }
+            const bool same_pcm_codec = generated_codec == 1 || generated_codec == 3;
+            if (same_pcm_codec && head_locked_input && prepared_head_locked) {
+                const app::SharedPcmPreparationPlan shared_pcm_plan =
+                    app::PlanSharedPcmPreparation(prepared_primary, *prepared_head_locked);
+                if (shared_pcm_plan.reprepare_first) {
+                    if (!prepare_audio(primary_input, primary_wav,
+                                       channel_based ? QStringLiteral("Channel-based")
+                                                     : QStringLiteral("Ambisonics"),
+                                       channel_based ? &channel_order : nullptr,
+                                       shared_pcm_plan.target_bit_depth, &prepared_primary))
+                        return false;
+                }
+                if (shared_pcm_plan.reprepare_second) {
+                    if (!prepare_audio(*head_locked_input, head_locked_wav,
+                                       QStringLiteral("Head-Locked Stereo"), nullptr,
+                                       shared_pcm_plan.target_bit_depth, &*prepared_head_locked))
+                        return false;
+                }
             }
             if (cancel_requested_.load()) {
                 if (error)
@@ -1353,13 +1378,16 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
             if (channel_based) {
                 metadata.channel_based = primary_input;
                 metadata.channel_based.media.path = prepared_primary.wav_path;
+                metadata.channel_based_bit_depth = prepared_primary.bit_depth;
             } else {
                 metadata.ambisonics = primary_input;
                 metadata.ambisonics.media.path = prepared_primary.wav_path;
+                metadata.ambisonics_bit_depth = prepared_primary.bit_depth;
             }
             if (head_locked_input && prepared_head_locked) {
                 metadata.head_locked_stereo = *head_locked_input;
                 metadata.head_locked_stereo.media.path = prepared_head_locked->wav_path;
+                metadata.head_locked_stereo_bit_depth = prepared_head_locked->bit_depth;
             }
             metadata.output_path = textproto_path;
             metadata.overwrite_existing_files = project_snapshot.overwrite_existing_files;

@@ -26,6 +26,9 @@ struct MetadataBuildOptions {
     int opus_bitrate_per_channel = 64000;
     bool overwrite_existing_files = true;
     GeneratedCodec generated_codec = GeneratedCodec::kOpus;
+    int ambisonics_bit_depth = 16;
+    int head_locked_stereo_bit_depth = 16;
+    int channel_based_bit_depth = 16;
     std::string mix_annotation = "Generated Mix Presentation";
 };
 

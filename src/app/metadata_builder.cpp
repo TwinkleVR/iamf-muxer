@@ -300,6 +300,67 @@ const char* AacSampleFrequencyIndexName(int sample_rate) {
     }
 }
 
+bool IsSupportedPcmBitDepth(int bit_depth) {
+    return bit_depth == 16 || bit_depth == 24 || bit_depth == 32;
+}
+
+void AppendCodecConfigMetadata(std::ostringstream* text, const MetadataBuildOptions& options,
+                               uint32_t codec_config_id, int bit_depth,
+                               int codec_samples_per_frame, const char* aac_sample_frequency_index) {
+    const bool use_lpcm = options.generated_codec == GeneratedCodec::kLpcm;
+    const bool use_aac_lc = options.generated_codec == GeneratedCodec::kAacLc;
+    const bool use_flac = options.generated_codec == GeneratedCodec::kFlac;
+    *text << "codec_config_metadata {\n"
+          << "  codec_config_id: " << codec_config_id << "\n"
+          << "  codec_config {\n"
+          << "    num_samples_per_frame: " << codec_samples_per_frame << "\n";
+    if (use_lpcm) {
+        *text << "    decoder_config_lpcm {\n"
+              << "      sample_format_flags: LPCM_LITTLE_ENDIAN\n"
+              << "      sample_size: " << bit_depth << "\n"
+              << "      sample_rate: " << options.sample_rate << "\n"
+              << "    }\n";
+    } else if (use_aac_lc) {
+        *text << "    decoder_config_aac {\n"
+              << "      buffer_size_db: 0\n"
+              << "      max_bitrate: 0\n"
+              << "      average_bit_rate: 0\n"
+              << "      decoder_specific_info {\n"
+              << "        sample_frequency_index: " << aac_sample_frequency_index << "\n"
+              << "      }\n"
+              << "      aac_encoder_metadata {\n"
+              << "        bitrate_mode: 0\n"
+              << "        enable_afterburner: true\n"
+              << "        signaling_mode: 2\n"
+              << "      }\n"
+              << "    }\n";
+    } else if (use_flac) {
+        *text << "    decoder_config_flac {\n"
+              << "      metadata_blocks {\n"
+              << "        header { block_type: FLAC_BLOCK_TYPE_STREAMINFO }\n"
+              << "        stream_info {\n"
+              << "          sample_rate: " << options.sample_rate << "\n"
+              << "          bits_per_sample: " << (bit_depth - 1) << "\n"
+              << "          total_samples_in_stream: 0\n"
+              << "        }\n"
+              << "      }\n"
+              << "      flac_encoder_metadata { compression_level: 5 }\n"
+              << "    }\n";
+    } else {
+        *text << "    decoder_config_opus {\n"
+              << "      version: 1\n"
+              << "      input_sample_rate: " << options.sample_rate << "\n"
+              << "      opus_encoder_metadata {\n"
+              << "        target_bitrate_per_channel: " << options.opus_bitrate_per_channel << "\n"
+              << "        application: APPLICATION_AUDIO\n"
+              << "        use_float_api: " << (bit_depth > 16 ? "true" : "false") << "\n"
+              << "      }\n"
+              << "    }\n";
+    }
+    *text << "  }\n"
+          << "}\n\n";
+}
+
 }  // namespace
 
 bool MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(const MetadataBuildOptions& options,
@@ -364,10 +425,30 @@ bool MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(const MetadataBuildOpti
         SetError(error, "AAC-LC requires a supported IAMF sample rate");
         return false;
     }
+    if (!IsSupportedPcmBitDepth(options.ambisonics_bit_depth) ||
+        (has_head_locked_stereo && !IsSupportedPcmBitDepth(options.head_locked_stereo_bit_depth))) {
+        SetError(error, "prepared audio bit depth must be 16, 24, or 32 bits");
+        return false;
+    }
+    if (use_aac_lc &&
+        (options.ambisonics_bit_depth > 16 ||
+         (has_head_locked_stereo && options.head_locked_stereo_bit_depth > 16))) {
+        SetError(error, "AAC-LC encoder input must be prepared as 16-bit PCM during audio preparation");
+        return false;
+    }
+    if (has_head_locked_stereo && (use_lpcm || use_flac) &&
+        options.ambisonics_bit_depth != options.head_locked_stereo_bit_depth) {
+        SetError(error, "LPCM/FLAC Ambisonics and Head-Locked Stereo must be prepared at the same bit depth");
+        return false;
+    }
     int codec_samples_per_frame = options.samples_per_frame;
     if (use_aac_lc) {
         codec_samples_per_frame = 1024;
     }
+    const int shared_codec_bit_depth = has_head_locked_stereo
+                                           ? std::max(options.ambisonics_bit_depth,
+                                                      options.head_locked_stereo_bit_depth)
+                                           : options.ambisonics_bit_depth;
 
     std::ostringstream text;
     text << "# proto-file: iamf/cli/proto/user_metadata.proto\n"
@@ -380,56 +461,9 @@ bool MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(const MetadataBuildOpti
          << "ia_sequence_header_metadata {\n"
          << "  primary_profile: PROFILE_VERSION_BASE\n"
          << "  additional_profile: PROFILE_VERSION_BASE\n"
-         << "}\n\n"
-         << "codec_config_metadata {\n"
-         << "  codec_config_id: 200\n"
-         << "  codec_config {\n"
-         << "    num_samples_per_frame: " << codec_samples_per_frame << "\n";
-    if (use_lpcm) {
-        text << "    decoder_config_lpcm {\n"
-             << "      sample_format_flags: LPCM_LITTLE_ENDIAN\n"
-             << "      sample_size: 16\n"
-             << "      sample_rate: " << options.sample_rate << "\n"
-             << "    }\n";
-    } else if (use_aac_lc) {
-        text << "    decoder_config_aac {\n"
-             << "      buffer_size_db: 0\n"
-             << "      max_bitrate: 0\n"
-             << "      average_bit_rate: 0\n"
-             << "      decoder_specific_info {\n"
-             << "        sample_frequency_index: " << aac_sample_frequency_index << "\n"
-             << "      }\n"
-             << "      aac_encoder_metadata {\n"
-             << "        bitrate_mode: 0\n"
-             << "        enable_afterburner: true\n"
-             << "        signaling_mode: 2\n"
-             << "      }\n"
-             << "    }\n";
-    } else if (use_flac) {
-        text << "    decoder_config_flac {\n"
-             << "      metadata_blocks {\n"
-             << "        header { block_type: FLAC_BLOCK_TYPE_STREAMINFO }\n"
-             << "        stream_info {\n"
-             << "          sample_rate: " << options.sample_rate << "\n"
-             << "          bits_per_sample: 15\n"
-             << "          total_samples_in_stream: 0\n"
-             << "        }\n"
-             << "      }\n"
-             << "      flac_encoder_metadata { compression_level: 5 }\n"
-             << "    }\n";
-    } else {
-        text << "    decoder_config_opus {\n"
-             << "      version: 1\n"
-             << "      input_sample_rate: " << options.sample_rate << "\n"
-             << "      opus_encoder_metadata {\n"
-             << "        target_bitrate_per_channel: " << options.opus_bitrate_per_channel << "\n"
-             << "        application: APPLICATION_AUDIO\n"
-             << "        use_float_api: false\n"
-             << "      }\n"
-             << "    }\n";
-    }
-    text << "  }\n"
          << "}\n\n";
+    AppendCodecConfigMetadata(&text, options, 200, shared_codec_bit_depth,
+                              codec_samples_per_frame, aac_sample_frequency_index);
     AppendChannelLabels(&text, ambisonics_channels, 300, ambisonics_wav, true);
     if (has_head_locked_stereo)
         AppendChannelLabels(&text, stereo_channels, 301, stereo_wav, false);
@@ -553,14 +587,20 @@ bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std
         return false;
     }
 
-    const bool use_lpcm = options.generated_codec == GeneratedCodec::kLpcm;
     const bool use_aac_lc = options.generated_codec == GeneratedCodec::kAacLc;
-    const bool use_flac = options.generated_codec == GeneratedCodec::kFlac;
     const char* aac_sample_frequency_index = use_aac_lc
                                                  ? AacSampleFrequencyIndexName(options.sample_rate)
                                                  : nullptr;
     if (use_aac_lc && aac_sample_frequency_index == nullptr) {
         SetError(error, "AAC-LC requires a supported IAMF sample rate");
+        return false;
+    }
+    if (!IsSupportedPcmBitDepth(options.channel_based_bit_depth)) {
+        SetError(error, "prepared audio bit depth must be 16, 24, or 32 bits");
+        return false;
+    }
+    if (use_aac_lc && options.channel_based_bit_depth > 16) {
+        SetError(error, "AAC-LC encoder input must be prepared as 16-bit PCM during audio preparation");
         return false;
     }
     const int codec_samples_per_frame = use_aac_lc ? 1024 : options.samples_per_frame;
@@ -581,56 +621,9 @@ bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std
          << "ia_sequence_header_metadata {\n"
          << "  primary_profile: PROFILE_VERSION_SIMPLE\n"
          << "  additional_profile: PROFILE_VERSION_SIMPLE\n"
-         << "}\n\n"
-         << "codec_config_metadata {\n"
-         << "  codec_config_id: 200\n"
-         << "  codec_config {\n"
-         << "    num_samples_per_frame: " << codec_samples_per_frame << "\n";
-    if (use_lpcm) {
-        text << "    decoder_config_lpcm {\n"
-             << "      sample_format_flags: LPCM_LITTLE_ENDIAN\n"
-             << "      sample_size: 16\n"
-             << "      sample_rate: " << options.sample_rate << "\n"
-             << "    }\n";
-    } else if (use_aac_lc) {
-        text << "    decoder_config_aac {\n"
-             << "      buffer_size_db: 0\n"
-             << "      max_bitrate: 0\n"
-             << "      average_bit_rate: 0\n"
-             << "      decoder_specific_info {\n"
-             << "        sample_frequency_index: " << aac_sample_frequency_index << "\n"
-             << "      }\n"
-             << "      aac_encoder_metadata {\n"
-             << "        bitrate_mode: 0\n"
-             << "        enable_afterburner: true\n"
-             << "        signaling_mode: 2\n"
-             << "      }\n"
-             << "    }\n";
-    } else if (use_flac) {
-        text << "    decoder_config_flac {\n"
-             << "      metadata_blocks {\n"
-             << "        header { block_type: FLAC_BLOCK_TYPE_STREAMINFO }\n"
-             << "        stream_info {\n"
-             << "          sample_rate: " << options.sample_rate << "\n"
-             << "          bits_per_sample: 15\n"
-             << "          total_samples_in_stream: 0\n"
-             << "        }\n"
-             << "      }\n"
-             << "      flac_encoder_metadata { compression_level: 5 }\n"
-             << "    }\n";
-    } else {
-        text << "    decoder_config_opus {\n"
-             << "      version: 1\n"
-             << "      input_sample_rate: " << options.sample_rate << "\n"
-             << "      opus_encoder_metadata {\n"
-             << "        target_bitrate_per_channel: " << options.opus_bitrate_per_channel << "\n"
-             << "        application: APPLICATION_AUDIO\n"
-             << "        use_float_api: false\n"
-             << "      }\n"
-             << "    }\n";
-    }
-    text << "  }\n"
          << "}\n\n";
+    AppendCodecConfigMetadata(&text, options, 200, options.channel_based_bit_depth,
+                              codec_samples_per_frame, aac_sample_frequency_index);
     AppendChannelBasedFrameLabels(&text, labels, 300, wav_filename);
     text << "audio_element_metadata {\n"
          << "  audio_element_id: 300\n"

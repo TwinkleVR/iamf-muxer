@@ -1,6 +1,7 @@
 #include "app/project_types.h"
 #include "app/metadata_builder.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -265,6 +266,117 @@ int main() {
         CHECK(serialized.find("info_type_bit_masks: []") != std::string::npos);
         CHECK(serialized.find("integrated_loudness:") == std::string::npos);
         CHECK(serialized.find("digital_peak:") == std::string::npos);
+    }
+
+    for (const int bit_depth : {16, 24, 32}) {
+        for (const auto codec : {GeneratedCodec::kLpcm, GeneratedCodec::kFlac}) {
+            MetadataBuildOptions depth_metadata;
+            depth_metadata.channel_based.media.path = metadata_directory / "prepared_depth.wav";
+            depth_metadata.channel_based.channel_layout = ChannelLayout::kStereo;
+            depth_metadata.channel_based.channel_layout_confirmed = true;
+            MediaStreamInfo depth_stream;
+            depth_stream.kind = MediaStreamKind::kAudio;
+            depth_stream.channel_count = 2;
+            depth_metadata.channel_based.media.streams.push_back(depth_stream);
+            depth_metadata.channel_based_bit_depth = bit_depth;
+            depth_metadata.generated_codec = codec;
+            depth_metadata.output_path = metadata_directory /
+                                         (std::string(codec == GeneratedCodec::kLpcm ? "lpcm_" : "flac_") +
+                                          std::to_string(bit_depth) + ".textproto");
+            CHECK(MetadataBuilder::WriteChannelBased(depth_metadata, &error));
+            std::ifstream depth_file(depth_metadata.output_path, std::ios::binary);
+            const std::string depth_text((std::istreambuf_iterator<char>(depth_file)),
+                                         std::istreambuf_iterator<char>());
+            if (codec == GeneratedCodec::kLpcm)
+                CHECK(depth_text.find("sample_size: " + std::to_string(bit_depth)) != std::string::npos);
+            else
+                CHECK(depth_text.find("bits_per_sample: " + std::to_string(bit_depth - 1)) !=
+                      std::string::npos);
+        }
+    }
+
+    MetadataBuildOptions opus_depth_metadata;
+    opus_depth_metadata.channel_based.media.path = metadata_directory / "prepared_opus_24.wav";
+    opus_depth_metadata.channel_based.channel_layout = ChannelLayout::kStereo;
+    opus_depth_metadata.channel_based.channel_layout_confirmed = true;
+    MediaStreamInfo opus_stream;
+    opus_stream.kind = MediaStreamKind::kAudio;
+    opus_stream.channel_count = 2;
+    opus_depth_metadata.channel_based.media.streams.push_back(opus_stream);
+    opus_depth_metadata.channel_based_bit_depth = 24;
+    opus_depth_metadata.output_path = metadata_directory / "opus_24.textproto";
+    CHECK(MetadataBuilder::WriteChannelBased(opus_depth_metadata, &error));
+    {
+        std::ifstream opus_file(opus_depth_metadata.output_path, std::ios::binary);
+        const std::string opus_text((std::istreambuf_iterator<char>(opus_file)),
+                                    std::istreambuf_iterator<char>());
+        CHECK(opus_text.find("use_float_api: true") != std::string::npos);
+    }
+
+    MetadataBuildOptions unsupported_aac_metadata = opus_depth_metadata;
+    unsupported_aac_metadata.generated_codec = GeneratedCodec::kAacLc;
+    unsupported_aac_metadata.output_path = metadata_directory / "aac_24.textproto";
+    CHECK(!MetadataBuilder::WriteChannelBased(unsupported_aac_metadata, &error));
+    CHECK(error.find("must be prepared as 16-bit PCM") != std::string::npos);
+
+    MetadataBuildOptions supported_aac_metadata = unsupported_aac_metadata;
+    supported_aac_metadata.channel_based_bit_depth = 16;
+    supported_aac_metadata.output_path = metadata_directory / "aac_16.textproto";
+    CHECK(MetadataBuilder::WriteChannelBased(supported_aac_metadata, &error));
+
+    for (const auto codec : {GeneratedCodec::kLpcm, GeneratedCodec::kFlac}) {
+        for (const auto [ambisonics_bit_depth, stereo_bit_depth] :
+             {std::pair{16, 16}, std::pair{24, 16}, std::pair{16, 24}, std::pair{32, 16},
+              std::pair{16, 32}, std::pair{24, 24}, std::pair{32, 32}}) {
+            MetadataBuildOptions mixed_depth_metadata;
+            mixed_depth_metadata.ambisonics.media.path = metadata_directory / "ambi.wav";
+            mixed_depth_metadata.ambisonics.role = AudioRole::kFirstOrderAmbisonics;
+            mixed_depth_metadata.ambisonics.role_confirmed = true;
+            MediaStreamInfo ambisonics_stream;
+            ambisonics_stream.kind = MediaStreamKind::kAudio;
+            ambisonics_stream.channel_count = 4;
+            mixed_depth_metadata.ambisonics.media.streams.push_back(ambisonics_stream);
+            mixed_depth_metadata.head_locked_stereo.media.path = metadata_directory / "stereo.wav";
+            mixed_depth_metadata.head_locked_stereo.role = AudioRole::kHeadLockedStereo;
+            mixed_depth_metadata.head_locked_stereo.role_confirmed = true;
+            MediaStreamInfo stereo_stream;
+            stereo_stream.kind = MediaStreamKind::kAudio;
+            stereo_stream.channel_count = 2;
+            mixed_depth_metadata.head_locked_stereo.media.streams.push_back(stereo_stream);
+            mixed_depth_metadata.ambisonics_bit_depth = ambisonics_bit_depth;
+            mixed_depth_metadata.head_locked_stereo_bit_depth = stereo_bit_depth;
+            mixed_depth_metadata.generated_codec = codec;
+            const std::string codec_name = codec == GeneratedCodec::kLpcm ? "lpcm" : "flac";
+            mixed_depth_metadata.output_path = metadata_directory /
+                                               ("mixed_" + codec_name + "_" +
+                                                std::to_string(ambisonics_bit_depth) + "_" +
+                                                std::to_string(stereo_bit_depth) + ".textproto");
+            const int common_bit_depth = std::max(ambisonics_bit_depth, stereo_bit_depth);
+            if (ambisonics_bit_depth != stereo_bit_depth) {
+                CHECK(!MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(mixed_depth_metadata, &error));
+                CHECK(error.find("must be prepared at the same bit depth") != std::string::npos);
+                mixed_depth_metadata.ambisonics_bit_depth = common_bit_depth;
+                mixed_depth_metadata.head_locked_stereo_bit_depth = common_bit_depth;
+            }
+            CHECK(MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(mixed_depth_metadata, &error));
+            std::ifstream mixed_file(mixed_depth_metadata.output_path, std::ios::binary);
+            const std::string mixed_text((std::istreambuf_iterator<char>(mixed_file)),
+                                         std::istreambuf_iterator<char>());
+            const std::string config_marker = "codec_config_metadata {";
+            CHECK(mixed_text.find(config_marker) != std::string::npos);
+            CHECK(mixed_text.find(config_marker) == mixed_text.rfind(config_marker));
+            CHECK(mixed_text.find("audio_element_id: 300\n  audio_element_type: AUDIO_ELEMENT_SCENE_BASED\n"
+                                  "  reserved: 0\n  codec_config_id: 200") != std::string::npos);
+            CHECK(mixed_text.find("audio_element_id: 301\n  audio_element_type: AUDIO_ELEMENT_CHANNEL_BASED\n"
+                                  "  reserved: 0\n  codec_config_id: 200") != std::string::npos);
+            if (codec == GeneratedCodec::kLpcm) {
+                CHECK(mixed_text.find("sample_size: " + std::to_string(common_bit_depth)) !=
+                      std::string::npos);
+            } else {
+                CHECK(mixed_text.find("bits_per_sample: " + std::to_string(common_bit_depth - 1)) !=
+                      std::string::npos);
+            }
+        }
     }
     std::filesystem::remove_all(metadata_directory);
     return 0;

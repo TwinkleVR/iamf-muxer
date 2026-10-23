@@ -11,8 +11,10 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
+#include <algorithm>
 #include <cstdint>
 #include <array>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -75,9 +77,111 @@ constexpr uint64_t kWavHeaderRiffBytes = 72;
 constexpr uint32_t kReservedDs64ChunkBytes = 28;
 constexpr std::streamoff kWavDataSizeOffset = 76;
 
-bool WriteWavHeader(std::ofstream* output, int sample_rate, int channels) {
-    const uint32_t byte_rate = static_cast<uint32_t>(sample_rate) * static_cast<uint32_t>(channels) * 2;
-    const uint16_t block_align = static_cast<uint16_t>(channels * 2);
+struct WavSampleFormatInfo {
+    AVSampleFormat swr_format = AV_SAMPLE_FMT_S16;
+    uint16_t wav_format_code = 1;
+    int bit_depth = 16;
+    int bytes_per_sample = 2;
+    int converted_bytes_per_sample = 2;
+    const char* name = "s16";
+};
+
+WavSampleFormatInfo GetWavSampleFormatInfo(PreparedAudioSampleFormat format) {
+    switch (format) {
+        case PreparedAudioSampleFormat::kPcmS16:
+            return {AV_SAMPLE_FMT_S16, 1, 16, 2, 2, "s16"};
+        case PreparedAudioSampleFormat::kPcmS24:
+            // libswresample has no packed S24 sample format. Convert through
+            // S32 and write the most-significant 24 bits to the WAV payload.
+            return {AV_SAMPLE_FMT_S32, 1, 24, 3, 4, "s24"};
+        case PreparedAudioSampleFormat::kPcmS32:
+            return {AV_SAMPLE_FMT_S32, 1, 32, 4, 4, "s32"};
+        case PreparedAudioSampleFormat::kFloat32:
+            return {AV_SAMPLE_FMT_FLT, 3, 32, 4, 4, "flt"};
+    }
+    return {};
+}
+
+bool IsFloatPcmCodec(AVCodecID codec_id) {
+    return codec_id == AV_CODEC_ID_PCM_F32LE || codec_id == AV_CODEC_ID_PCM_F32BE ||
+           codec_id == AV_CODEC_ID_PCM_F64LE || codec_id == AV_CODEC_ID_PCM_F64BE;
+}
+
+bool SelectPreparedSampleFormat(const AVCodecContext* decoder, const AVCodecParameters* parameters,
+                                AudioPreparationPrecisionPolicy precision_policy,
+                                int target_pcm_bit_depth,
+                                PreparedAudioSampleFormat* format, std::string* error) {
+    if (decoder == nullptr || parameters == nullptr || format == nullptr) {
+        SetError(error, "cannot determine prepared WAV sample format");
+        return false;
+    }
+    auto format_for_bit_depth = [](int bit_depth) {
+        switch (bit_depth) {
+            case 16:
+                return PreparedAudioSampleFormat::kPcmS16;
+            case 24:
+                return PreparedAudioSampleFormat::kPcmS24;
+            case 32:
+                return PreparedAudioSampleFormat::kPcmS32;
+            default:
+                return PreparedAudioSampleFormat::kPcmS16;
+        }
+    };
+    const AVSampleFormat packed_input_format = av_get_packed_sample_fmt(decoder->sample_fmt);
+    if (IsFloatPcmCodec(parameters->codec_id)) {
+        if (parameters->codec_id == AV_CODEC_ID_PCM_F64LE || parameters->codec_id == AV_CODEC_ID_PCM_F64BE) {
+            SetError(error, "64-bit float PCM input is not supported by the prepared WAV precision policy");
+            return false;
+        }
+        if (packed_input_format != AV_SAMPLE_FMT_FLT) {
+            SetError(error, "32-bit float PCM decoder returned an unexpected sample format");
+            return false;
+        }
+        if (target_pcm_bit_depth != 0) {
+            *format = format_for_bit_depth(target_pcm_bit_depth);
+        } else {
+            *format = precision_policy == AudioPreparationPrecisionPolicy::kForcePcmS16
+                          ? PreparedAudioSampleFormat::kPcmS16
+                          : PreparedAudioSampleFormat::kFloat32;
+        }
+        return true;
+    }
+
+    int source_bit_depth = std::max(parameters->bits_per_raw_sample, parameters->bits_per_coded_sample);
+    if (source_bit_depth <= 0)
+        source_bit_depth = av_get_bits_per_sample(parameters->codec_id);
+    if (source_bit_depth <= 0) {
+        // Lossy codecs generally have no meaningful PCM source bit depth. Keep
+        // the established S16 preparation behavior for those inputs.
+        *format = PreparedAudioSampleFormat::kPcmS16;
+    } else if (source_bit_depth <= 16) {
+        *format = PreparedAudioSampleFormat::kPcmS16;
+    } else if (source_bit_depth <= 24) {
+        *format = PreparedAudioSampleFormat::kPcmS24;
+    } else if (source_bit_depth <= 32) {
+        *format = PreparedAudioSampleFormat::kPcmS32;
+    } else {
+        SetError(error, "audio source bit depth exceeds the supported 32-bit prepared WAV formats");
+        return false;
+    }
+    if (precision_policy == AudioPreparationPrecisionPolicy::kForcePcmS16)
+        *format = PreparedAudioSampleFormat::kPcmS16;
+    if (target_pcm_bit_depth != 0)
+        *format = format_for_bit_depth(target_pcm_bit_depth);
+    return true;
+}
+
+bool WriteWavHeader(std::ofstream* output, int sample_rate, int channels,
+                    const WavSampleFormatInfo& sample_format) {
+    const uint64_t byte_rate_64 = static_cast<uint64_t>(sample_rate) * static_cast<uint64_t>(channels) *
+                                  static_cast<uint64_t>(sample_format.bytes_per_sample);
+    const uint32_t block_align_32 = static_cast<uint32_t>(channels) *
+                                    static_cast<uint32_t>(sample_format.bytes_per_sample);
+    if (byte_rate_64 > std::numeric_limits<uint32_t>::max() ||
+        block_align_32 > std::numeric_limits<uint16_t>::max())
+        return false;
+    const uint32_t byte_rate = static_cast<uint32_t>(byte_rate_64);
+    const uint16_t block_align = static_cast<uint16_t>(block_align_32);
     output->write("RIFF", 4);
     if (!WriteU32(output, 0))
         return false;
@@ -88,22 +192,26 @@ bool WriteWavHeader(std::ofstream* output, int sample_rate, int channels) {
     const char reserved_ds64[kReservedDs64ChunkBytes] = {};
     output->write(reserved_ds64, sizeof(reserved_ds64));
     output->write("fmt ", 4);
-    if (!WriteU32(output, 16) || !WriteU16(output, 1) || !WriteU16(output, static_cast<uint16_t>(channels)) ||
+    if (!WriteU32(output, 16) || !WriteU16(output, sample_format.wav_format_code) ||
+        !WriteU16(output, static_cast<uint16_t>(channels)) ||
         !WriteU32(output, static_cast<uint32_t>(sample_rate)) || !WriteU32(output, byte_rate) ||
-        !WriteU16(output, block_align) || !WriteU16(output, 16))
+        !WriteU16(output, block_align) || !WriteU16(output, static_cast<uint16_t>(sample_format.bit_depth)))
         return false;
     output->write("data", 4);
     return WriteU32(output, 0);
 }
 
-bool FinalizeWavHeader(std::ofstream* output, int channels, uint64_t data_bytes) {
-    if (channels <= 0 || data_bytes % (static_cast<uint64_t>(channels) * 2) != 0 ||
+bool FinalizeWavHeader(std::ofstream* output, int channels, int bytes_per_sample, uint64_t data_bytes) {
+    const uint64_t bytes_per_sample_frame = static_cast<uint64_t>(channels) *
+                                            static_cast<uint64_t>(bytes_per_sample);
+    if (channels <= 0 || bytes_per_sample <= 0 || bytes_per_sample_frame == 0 ||
+        data_bytes % bytes_per_sample_frame != 0 ||
         data_bytes > std::numeric_limits<uint64_t>::max() - kWavHeaderRiffBytes) {
         return false;
     }
 
     const uint64_t riff_size = kWavHeaderRiffBytes + data_bytes;
-    const uint64_t sample_count = data_bytes / (static_cast<uint64_t>(channels) * 2);
+    const uint64_t sample_count = data_bytes / bytes_per_sample_frame;
     const uint64_t max_classic_data_bytes =
         static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) - kWavHeaderRiffBytes;
     if (data_bytes <= max_classic_data_bytes) {
@@ -150,11 +258,12 @@ struct SwrDeleter {
     void operator()(SwrContext* context) const { swr_free(&context); }
 };
 
-bool WriteSamples(std::ofstream* output, const uint8_t* data, int samples, int channels, uint64_t* bytes_written,
-                  std::string* error) {
+bool WriteSamples(std::ofstream* output, const uint8_t* data, int samples, int channels, int bytes_per_sample,
+                  uint64_t* bytes_written, std::string* error) {
     if (samples <= 0)
         return true;
-    const uint64_t bytes = static_cast<uint64_t>(samples) * static_cast<uint64_t>(channels) * 2;
+    const uint64_t bytes = static_cast<uint64_t>(samples) * static_cast<uint64_t>(channels) *
+                           static_cast<uint64_t>(bytes_per_sample);
     if (bytes > std::numeric_limits<uint64_t>::max() - *bytes_written ||
         bytes > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
         SetError(error, "prepared WAV exceeds the supported RF64 size limit");
@@ -170,38 +279,77 @@ bool WriteSamples(std::ofstream* output, const uint8_t* data, int samples, int c
 }
 
 bool ReorderInterleavedSamples(const uint8_t* source, int samples, int channels,
+                               int bytes_per_sample,
                                const std::vector<int>& output_channel_to_input,
                                std::vector<uint8_t>* reordered, std::string* error) {
-    if (source == nullptr || reordered == nullptr || samples < 0 || channels <= 0 ||
+    if (source == nullptr || reordered == nullptr || samples < 0 || channels <= 0 || bytes_per_sample <= 0 ||
         output_channel_to_input.size() != static_cast<std::size_t>(channels)) {
         SetError(error, "invalid channel reorder configuration");
         return false;
     }
-    reordered->resize(static_cast<std::size_t>(samples) * static_cast<std::size_t>(channels) * 2);
+    reordered->resize(static_cast<std::size_t>(samples) * static_cast<std::size_t>(channels) *
+                      static_cast<std::size_t>(bytes_per_sample));
     for (int sample = 0; sample < samples; ++sample) {
         for (int output_channel = 0; output_channel < channels; ++output_channel) {
             const int input_channel = output_channel_to_input[static_cast<std::size_t>(output_channel)];
             const std::size_t source_offset =
                 (static_cast<std::size_t>(sample) * static_cast<std::size_t>(channels) +
-                 static_cast<std::size_t>(input_channel)) * 2;
+                 static_cast<std::size_t>(input_channel)) * static_cast<std::size_t>(bytes_per_sample);
             const std::size_t output_offset =
                 (static_cast<std::size_t>(sample) * static_cast<std::size_t>(channels) +
-                 static_cast<std::size_t>(output_channel)) * 2;
-            (*reordered)[output_offset] = source[source_offset];
-            (*reordered)[output_offset + 1] = source[source_offset + 1];
+                 static_cast<std::size_t>(output_channel)) * static_cast<std::size_t>(bytes_per_sample);
+            std::copy_n(source + source_offset, bytes_per_sample, reordered->data() + output_offset);
         }
+    }
+    return true;
+}
+
+bool PackS24Samples(const uint8_t* source, int samples, int channels, std::vector<uint8_t>* packed,
+                    std::string* error) {
+    if (source == nullptr || packed == nullptr || samples < 0 || channels <= 0) {
+        SetError(error, "invalid 24-bit PCM packing configuration");
+        return false;
+    }
+    const std::size_t sample_count = static_cast<std::size_t>(samples) * static_cast<std::size_t>(channels);
+    packed->resize(sample_count * 3);
+    for (std::size_t index = 0; index < sample_count; ++index) {
+        int32_t sample = 0;
+        std::memcpy(&sample, source + index * sizeof(sample), sizeof(sample));
+        const uint32_t left_justified = static_cast<uint32_t>(sample);
+        const uint32_t sample_24 = left_justified >> 8;
+        (*packed)[index * 3] = static_cast<uint8_t>(sample_24 & 0xff);
+        (*packed)[index * 3 + 1] = static_cast<uint8_t>((sample_24 >> 8) & 0xff);
+        (*packed)[index * 3 + 2] = static_cast<uint8_t>((sample_24 >> 16) & 0xff);
     }
     return true;
 }
 
 }  // namespace
 
+SharedPcmPreparationPlan PlanSharedPcmPreparation(const PreparedAudioInfo& first,
+                                                  const PreparedAudioInfo& second) {
+    const bool contains_float32 = first.sample_format == PreparedAudioSampleFormat::kFloat32 ||
+                                  second.sample_format == PreparedAudioSampleFormat::kFloat32;
+    const int target_bit_depth = contains_float32 ? 32 : std::max(first.bit_depth, second.bit_depth);
+    if (contains_float32) {
+        return {target_bit_depth,
+                first.sample_format != PreparedAudioSampleFormat::kPcmS32 ||
+                    first.bit_depth != target_bit_depth,
+                second.sample_format != PreparedAudioSampleFormat::kPcmS32 ||
+                    second.bit_depth != target_bit_depth};
+    }
+    return {target_bit_depth, first.bit_depth < target_bit_depth, second.bit_depth < target_bit_depth};
+}
+
 bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& options, PreparedAudioInfo* info,
                                             std::string* error) {
     IAMF_MUX_LOG_INFO(
-        "[AudioPreparation] starting: input={} requested_stream={} output={} output_sample_rate={} preserve_unspecified_channel_order={} reorder_channels={}",
+        "[AudioPreparation] starting: input={} requested_stream={} output={} output_sample_rate={} precision_policy={} target_pcm_bit_depth={} preserve_unspecified_channel_order={} reorder_channels={}",
         options.input_path.u8string(), options.stream_index, options.output_wav_path.u8string(),
-        options.output_sample_rate, options.preserve_unspecified_channel_order,
+        options.output_sample_rate,
+        options.precision_policy == AudioPreparationPrecisionPolicy::kForcePcmS16 ? "force_s16" : "preserve_source",
+        options.target_pcm_bit_depth,
+        options.preserve_unspecified_channel_order,
         options.output_channel_to_input.size());
     if (info == nullptr || options.input_path.empty() || options.output_wav_path.empty()) {
         SetError(error, "audio preparation requires input, output, and result arguments");
@@ -209,6 +357,16 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
     }
     if (options.output_sample_rate <= 0 || options.output_sample_rate > 384000) {
         SetError(error, "invalid output sample rate");
+        return false;
+    }
+    if (options.target_pcm_bit_depth != 0 && options.target_pcm_bit_depth != 16 &&
+        options.target_pcm_bit_depth != 24 && options.target_pcm_bit_depth != 32) {
+        SetError(error, "target PCM bit depth must be 16, 24, or 32 bits");
+        return false;
+    }
+    if (options.precision_policy == AudioPreparationPrecisionPolicy::kForcePcmS16 &&
+        options.target_pcm_bit_depth != 0 && options.target_pcm_bit_depth != 16) {
+        SetError(error, "forced 16-bit PCM policy conflicts with the requested target bit depth");
         return false;
     }
     std::error_code filesystem_error;
@@ -277,6 +435,12 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
         SetError(error, "selected audio stream has an invalid sample rate");
         return false;
     }
+    PreparedAudioSampleFormat prepared_format = PreparedAudioSampleFormat::kPcmS16;
+    if (!SelectPreparedSampleFormat(decoder.get(), stream->codecpar, options.precision_policy,
+                                    options.target_pcm_bit_depth,
+                                    &prepared_format, error))
+        return false;
+    const WavSampleFormatInfo sample_format = GetWavSampleFormatInfo(prepared_format);
 
     AVChannelLayout input_layout{};
     if (decoder->ch_layout.nb_channels <= 0) {
@@ -288,11 +452,13 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
                                    input_channel_layout.size()) < 0)
         input_channel_layout[0] = '\0';
     IAMF_MUX_LOG_INFO(
-        "[AudioPreparation] selected stream: index={} codec={} sample_rate={} channels={} sample_format={} channel_layout={} time_base={}/{} bitrate={}",
+        "[AudioPreparation] selected stream: index={} codec={} sample_rate={} channels={} sample_format={} source_bits_per_sample={} prepared_format={} prepared_bits_per_sample={} channel_layout={} time_base={}/{} bitrate={}",
         stream_index, codec->name, decoder->sample_rate, decoder->ch_layout.nb_channels,
         av_get_sample_fmt_name(decoder->sample_fmt) == nullptr
             ? "unknown"
             : av_get_sample_fmt_name(decoder->sample_fmt),
+        std::max(stream->codecpar->bits_per_raw_sample, stream->codecpar->bits_per_coded_sample),
+        sample_format.name, sample_format.bit_depth,
         input_channel_layout[0] == '\0' ? "unknown" : input_channel_layout.data(),
         stream->time_base.num, stream->time_base.den, stream->codecpar->bit_rate);
     if (decoder->ch_layout.order != AV_CHANNEL_ORDER_UNSPEC) {
@@ -315,7 +481,7 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
         return false;
     }
     SwrContext* raw_swr = nullptr;
-    status = swr_alloc_set_opts2(&raw_swr, &output_layout, AV_SAMPLE_FMT_S16, options.output_sample_rate,
+    status = swr_alloc_set_opts2(&raw_swr, &output_layout, sample_format.swr_format, options.output_sample_rate,
                                  &input_layout, decoder->sample_fmt, decoder->sample_rate, 0, nullptr);
     av_channel_layout_uninit(&input_layout);
     av_channel_layout_uninit(&output_layout);
@@ -352,7 +518,7 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
         }
     }
     std::ofstream output(options.output_wav_path, std::ios::binary | std::ios::trunc);
-    if (!output || !WriteWavHeader(&output, options.output_sample_rate, output_channels)) {
+    if (!output || !WriteWavHeader(&output, options.output_sample_rate, output_channels, sample_format)) {
         SetError(error, "cannot create prepared WAV: " + options.output_wav_path.u8string());
         return false;
     }
@@ -364,7 +530,25 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
     }
     std::vector<uint8_t> converted;
     std::vector<uint8_t> reordered;
+    std::vector<uint8_t> packed_s24;
     uint64_t data_bytes = 0;
+    auto write_converted_samples = [&](int converted_samples) -> bool {
+        const uint8_t* samples_to_write = converted.data();
+        if (!output_channel_to_input.empty()) {
+            if (!ReorderInterleavedSamples(converted.data(), converted_samples, output_channels,
+                                           sample_format.converted_bytes_per_sample,
+                                           output_channel_to_input, &reordered, error))
+                return false;
+            samples_to_write = reordered.data();
+        }
+        if (prepared_format == PreparedAudioSampleFormat::kPcmS24) {
+            if (!PackS24Samples(samples_to_write, converted_samples, output_channels, &packed_s24, error))
+                return false;
+            samples_to_write = packed_s24.data();
+        }
+        return WriteSamples(&output, samples_to_write, converted_samples, output_channels,
+                            sample_format.bytes_per_sample, &data_bytes, error);
+    };
     auto receive_frames = [&]() -> bool {
         while (true) {
             const int receive_status = avcodec_receive_frame(decoder.get(), frame.get());
@@ -386,7 +570,8 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
                 return false;
             }
             const int output_capacity = static_cast<int>(output_capacity_64);
-            converted.resize(static_cast<size_t>(output_capacity) * static_cast<size_t>(output_channels) * 2);
+            converted.resize(static_cast<size_t>(output_capacity) * static_cast<size_t>(output_channels) *
+                              static_cast<size_t>(sample_format.converted_bytes_per_sample));
             uint8_t* output_data[1] = {converted.data()};
             const int converted_samples = swr_convert(resampler.get(), output_data, output_capacity,
                                                        const_cast<const uint8_t**>(frame->extended_data), frame->nb_samples);
@@ -394,14 +579,7 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
                 SetError(error, "failed while converting audio samples: " + AvError(converted_samples));
                 return false;
             }
-            const uint8_t* samples_to_write = converted.data();
-            if (!output_channel_to_input.empty()) {
-                if (!ReorderInterleavedSamples(converted.data(), converted_samples, output_channels,
-                                               output_channel_to_input, &reordered, error))
-                    return false;
-                samples_to_write = reordered.data();
-            }
-            if (!WriteSamples(&output, samples_to_write, converted_samples, output_channels, &data_bytes, error))
+            if (!write_converted_samples(converted_samples))
                 return false;
             av_frame_unref(frame.get());
         }
@@ -442,35 +620,34 @@ bool AudioPreparationService::PrepareToWav(const AudioPreparationOptions& option
     }
     const int flushed_capacity = static_cast<int>(flushed_capacity_64);
     if (flushed_capacity > 0) {
-        converted.resize(static_cast<size_t>(flushed_capacity) * static_cast<size_t>(output_channels) * 2);
+        converted.resize(static_cast<size_t>(flushed_capacity) * static_cast<size_t>(output_channels) *
+                          static_cast<size_t>(sample_format.converted_bytes_per_sample));
         uint8_t* output_data[1] = {converted.data()};
         const int flushed_samples = swr_convert(resampler.get(), output_data, flushed_capacity, nullptr, 0);
         if (flushed_samples < 0) {
             SetError(error, "failed while flushing converted audio samples: " + AvError(flushed_samples));
             return false;
         }
-        const uint8_t* samples_to_write = converted.data();
-        if (!output_channel_to_input.empty()) {
-            if (!ReorderInterleavedSamples(converted.data(), flushed_samples, output_channels,
-                                           output_channel_to_input, &reordered, error))
-                return false;
-            samples_to_write = reordered.data();
-        }
-        if (!WriteSamples(&output, samples_to_write, flushed_samples, output_channels, &data_bytes, error))
+        if (!write_converted_samples(flushed_samples))
             return false;
     }
-    if (!FinalizeWavHeader(&output, output_channels, data_bytes)) {
+    if (!FinalizeWavHeader(&output, output_channels, sample_format.bytes_per_sample, data_bytes)) {
         SetError(error, "failed to finalize prepared WAV header");
         return false;
     }
     output.close();
     info->wav_path = options.output_wav_path;
-    const uint64_t sample_count = data_bytes / (static_cast<uint64_t>(output_channels) * 2);
+    info->sample_format = prepared_format;
+    info->bit_depth = sample_format.bit_depth;
+    const uint64_t sample_count = data_bytes /
+                                  (static_cast<uint64_t>(output_channels) *
+                                   static_cast<uint64_t>(sample_format.bytes_per_sample));
     const double duration_seconds = static_cast<double>(sample_count) / options.output_sample_rate;
     IAMF_MUX_LOG_INFO(
-        "[AudioPreparation] completed: input={} stream={} output={} output_sample_rate={} channels={} sample_format=s16 samples={} duration_seconds={:.3f} data_bytes={}",
+        "[AudioPreparation] completed: input={} stream={} output={} output_sample_rate={} channels={} sample_format={} bit_depth={} samples={} duration_seconds={:.3f} data_bytes={}",
         options.input_path.u8string(), stream_index, options.output_wav_path.u8string(),
-        options.output_sample_rate, output_channels, sample_count, duration_seconds, data_bytes);
+        options.output_sample_rate, output_channels, sample_format.name, sample_format.bit_depth,
+        sample_count, duration_seconds, data_bytes);
     return true;
 }
 
