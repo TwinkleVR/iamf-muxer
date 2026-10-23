@@ -432,6 +432,15 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 64
 
+            DragHandler {
+                acceptedButtons: Qt.LeftButton
+                target: null
+                onActiveChanged: {
+                    if (active)
+                        window.startSystemMove()
+                }
+            }
+
             RowLayout {
                 anchors.centerIn: parent
                 anchors.horizontalCenterOffset: -16
@@ -468,7 +477,6 @@ ApplicationWindow {
 
         ColumnLayout {
             id: workflowSelector
-            enabled: !guiController.jobRunning
             Layout.fillWidth: true
             Layout.leftMargin: 20
             Layout.rightMargin: 20
@@ -477,6 +485,14 @@ ApplicationWindow {
             Layout.maximumHeight: 112
             spacing: 7
 
+            DragHandler {
+                acceptedButtons: Qt.LeftButton
+                target: null
+                onActiveChanged: {
+                    if (active)
+                        window.startSystemMove()
+                }
+            }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -755,12 +771,12 @@ ApplicationWindow {
         }
         Item {
             id: editorContainer
-            enabled: guiController.modeSelected
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
             Rectangle {
+                id: editorDisabledOverlay
                 z: 100
                 anchors.fill: parent
                 visible: !guiController.modeSelected
@@ -769,6 +785,15 @@ ApplicationWindow {
                 border.width: 1
                 border.color: "#343434"
                 radius: 4
+
+                DragHandler {
+                    acceptedButtons: Qt.LeftButton
+                    target: null
+                    onActiveChanged: {
+                        if (active)
+                            window.startSystemMove()
+                    }
+                }
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -793,6 +818,7 @@ ApplicationWindow {
             }
                 ScrollView {
                 id: editorScrollView
+                enabled: !editorDisabledOverlay.visible
                 anchors.fill: parent
                 anchors.bottomMargin: 70
                 clip: true
@@ -2683,11 +2709,21 @@ ApplicationWindow {
 
             Item {
                 id: startActionArea
+                enabled: !editorDisabledOverlay.visible
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 70
                 z: 1
+
+                DragHandler {
+                    acceptedButtons: Qt.LeftButton
+                    target: null
+                    onActiveChanged: {
+                        if (active)
+                            window.startSystemMove()
+                    }
+                }
 
                 Button {
                     id: startButton
@@ -2747,6 +2783,15 @@ ApplicationWindow {
             color: "#0e0e0e"
             border.width: 1
             border.color: "#303030"
+
+            DragHandler {
+                acceptedButtons: Qt.LeftButton
+                target: null
+                onActiveChanged: {
+                    if (active)
+                        window.startSystemMove()
+                }
+            }
 
             RowLayout {
                 anchors.fill: parent
