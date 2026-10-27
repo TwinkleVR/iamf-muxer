@@ -1,4 +1,5 @@
 #include "app/audio_preparation_service.h"
+#include "app/project_types.h"
 
 #include <cstdint>
 #include <cstring>
@@ -345,6 +346,58 @@ bool PrepareAndCheckReorderedS24(const std::filesystem::path& directory) {
     return true;
 }
 
+bool PrepareAndCheckReorderedTenChannelPcm(
+    const std::filesystem::path& directory, InputChannelOrderPreset preset,
+    const std::vector<int>& expected_channel_order, const std::string& name) {
+    constexpr int channels = 10;
+    constexpr int frames = 3;
+    const auto input_path = directory / ("source_10ch_" + name + ".wav");
+    const auto output_path = directory / ("prepared_10ch_" + name + ".wav");
+    std::vector<int32_t> source_samples;
+    source_samples.reserve(frames * channels);
+    for (int frame = 0; frame < frames; ++frame) {
+        for (int channel = 0; channel < channels; ++channel)
+            source_samples.push_back((frame + 1) * 1000 + (channel + 1) * 100);
+    }
+    CHECK(WriteInputWav(input_path, 16, source_samples, 48000, channels));
+
+    std::vector<int> output_channel_to_input;
+    std::string error;
+    CHECK(BuildChannelOrderForIamf(preset, &output_channel_to_input, &error));
+    CHECK(output_channel_to_input == expected_channel_order);
+
+    AudioPreparationOptions options;
+    options.input_path = input_path;
+    options.stream_index = 0;
+    options.output_wav_path = output_path;
+    options.output_sample_rate = 48000;
+    options.preserve_unspecified_channel_order = true;
+    options.output_channel_to_input = output_channel_to_input;
+    PreparedAudioInfo prepared;
+    CHECK(AudioPreparationService::PrepareToWav(options, &prepared, &error));
+    CHECK(prepared.bit_depth == 16);
+
+    const std::vector<uint8_t> bytes = ReadFile(output_path);
+    const std::size_t sample_count = source_samples.size();
+    CHECK(bytes.size() == 80 + sample_count * sizeof(int16_t));
+    CHECK(ReadU32(bytes, 76) == sample_count * sizeof(int16_t));
+    for (int frame = 0; frame < frames; ++frame) {
+        for (int output_channel = 0; output_channel < channels; ++output_channel) {
+            const int input_channel =
+                output_channel_to_input[static_cast<std::size_t>(output_channel)];
+            const int32_t expected_sample =
+                source_samples[static_cast<std::size_t>(frame * channels + input_channel)];
+            const uint16_t raw_sample = static_cast<uint16_t>(expected_sample);
+            const std::size_t output_sample_index =
+                static_cast<std::size_t>(frame * channels + output_channel);
+            const std::size_t output_offset = 80 + output_sample_index * sizeof(int16_t);
+            CHECK(bytes[output_offset] == static_cast<uint8_t>(raw_sample & 0xff));
+            CHECK(bytes[output_offset + 1] == static_cast<uint8_t>((raw_sample >> 8) & 0xff));
+        }
+    }
+    return true;
+}
+
 bool PrepareAndCheckResampledS24(const std::filesystem::path& directory) {
     const auto input_path = directory / "source_s24_resampled.wav";
     const auto output_path = directory / "prepared_s24_resampled.wav";
@@ -398,6 +451,12 @@ int main(int argc, char** argv) {
         !PrepareAndCheckForcedS16(directory, 32, {0x12345678, -0x12345678, 1, -1}) ||
         !PrepareAndCheckFloat32(directory) ||
         !CheckSharedPcmPreparationPlans() ||
+        !PrepareAndCheckReorderedTenChannelPcm(
+            directory, InputChannelOrderPreset::k7_1_2Film,
+            {0, 2, 1, 7, 3, 4, 5, 6, 8, 9}, "film") ||
+        !PrepareAndCheckReorderedTenChannelPcm(
+            directory, InputChannelOrderPreset::k7_1_2Wav,
+            {0, 1, 2, 3, 6, 7, 4, 5, 8, 9}, "wav") ||
         !PrepareAndCheckReorderedS24(directory) ||
         !PrepareAndCheckResampledS24(directory))
         return 1;

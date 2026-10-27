@@ -129,6 +129,13 @@ std::vector<const char*> ChannelBasedLabels(ChannelLayout layout) {
                     "CHANNEL_LABEL_LFE", "CHANNEL_LABEL_LSS_7", "CHANNEL_LABEL_RSS_7",
                     "CHANNEL_LABEL_LRS_7", "CHANNEL_LABEL_RRS_7", "CHANNEL_LABEL_LTF_4",
                     "CHANNEL_LABEL_RTF_4", "CHANNEL_LABEL_LTB_4", "CHANNEL_LABEL_RTB_4"};
+        case ChannelLayout::k9_1_6:
+            return {"CHANNEL_LABEL_FL", "CHANNEL_LABEL_FR", "CHANNEL_LABEL_FC",
+                    "CHANNEL_LABEL_LFE", "CHANNEL_LABEL_BL", "CHANNEL_LABEL_BR",
+                    "CHANNEL_LABEL_FLC", "CHANNEL_LABEL_FRC", "CHANNEL_LABEL_SI_L",
+                    "CHANNEL_LABEL_SI_R", "CHANNEL_LABEL_TP_FL", "CHANNEL_LABEL_TP_FR",
+                    "CHANNEL_LABEL_TP_BL", "CHANNEL_LABEL_TP_BR", "CHANNEL_LABEL_TP_SI_L",
+                    "CHANNEL_LABEL_TP_SI_R"};
         case ChannelLayout::kUnset:
             return {};
     }
@@ -152,6 +159,8 @@ int ChannelBasedSubstreamCount(ChannelLayout layout) {
             return 5;
         case ChannelLayout::k7_1_4:
             return 7;
+        case ChannelLayout::k9_1_6:
+            return 9;
         case ChannelLayout::kUnset:
             return 0;
     }
@@ -176,6 +185,8 @@ int ChannelBasedCoupledSubstreamCount(ChannelLayout layout) {
             return 3;
         case ChannelLayout::k7_1_4:
             return 5;
+        case ChannelLayout::k9_1_6:
+            return 7;
         case ChannelLayout::kUnset:
             return 0;
     }
@@ -233,6 +244,8 @@ const char* AdditionalChannelBasedSoundSystem(ChannelLayout layout) {
             return "SOUND_SYSTEM_10_2_7_0";
         case ChannelLayout::k7_1_4:
             return "SOUND_SYSTEM_J_4_7_0";
+        case ChannelLayout::k9_1_6:
+            return "SOUND_SYSTEM_13_6_9_0";
         case ChannelLayout::kUnset:
             return nullptr;
     }
@@ -560,8 +573,11 @@ bool MetadataBuilder::WriteAmbisonicsAndHeadLockedStereo(const MetadataBuildOpti
 bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std::string* error) {
     const ProjectAudioInput& input = options.channel_based;
     if (options.output_path.empty() || input.media.path.empty() ||
-        input.channel_layout == ChannelLayout::kUnset || !input.channel_layout_confirmed) {
-        SetError(error, "metadata requires a confirmed Channel-based input and an output path");
+        input.channel_layout == ChannelLayout::kUnset ||
+        input.input_channel_order_preset == InputChannelOrderPreset::kUnset ||
+        LayoutForInputChannelOrderPreset(input.input_channel_order_preset) != input.channel_layout ||
+        !input.input_channel_order_confirmed) {
+        SetError(error, "metadata requires a confirmed input order preset and an output path");
         return false;
     }
     const auto audio_stream = std::find_if(input.media.streams.begin(), input.media.streams.end(),
@@ -610,6 +626,9 @@ bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std
         return false;
     }
 
+    const char* profile_name = input.channel_layout == ChannelLayout::k9_1_6
+                                   ? "PROFILE_VERSION_BASE_ENHANCED"
+                                   : "PROFILE_VERSION_SIMPLE";
     std::ostringstream text;
     text << "# proto-file: iamf/cli/proto/user_metadata.proto\n"
          << "# proto-message: UserMetadata\n\n"
@@ -619,8 +638,8 @@ bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std
          << "  is_valid: true\n"
          << "}\n\n"
          << "ia_sequence_header_metadata {\n"
-         << "  primary_profile: PROFILE_VERSION_SIMPLE\n"
-         << "  additional_profile: PROFILE_VERSION_SIMPLE\n"
+         << "  primary_profile: " << profile_name << "\n"
+         << "  additional_profile: " << profile_name << "\n"
          << "}\n\n";
     AppendCodecConfigMetadata(&text, options, 200, options.channel_based_bit_depth,
                               codec_samples_per_frame, aac_sample_frequency_index);
@@ -642,8 +661,11 @@ bool MetadataBuilder::WriteChannelBased(const MetadataBuildOptions& options, std
          << "      recon_gain_is_present_flag: 0\n"
          << "      reserved_a: 0\n"
          << "      substream_count: " << substream_count << "\n"
-         << "      coupled_substream_count: " << coupled_substream_count << "\n"
-         << "    }]\n"
+         << "      coupled_substream_count: " << coupled_substream_count << "\n";
+    const char* expanded_layout_name = IamfExpandedLayoutName(input.channel_layout);
+    if (expanded_layout_name[0] != '\0')
+        text << "      expanded_loudspeaker_layout: " << expanded_layout_name << "\n";
+    text << "    }]\n"
          << "  }\n"
          << "}\n\n"
          << "mix_presentation_metadata {\n"

@@ -54,6 +54,15 @@ MediaProbeInfo MakeChannelInput(const std::filesystem::path& path, int channel_c
     return input;
 }
 
+InputChannelOrderPreset FirstPresetForLayout(ChannelLayout layout) {
+    for (const InputChannelOrderPreset preset :
+         InputChannelOrderPresetsForChannelCount(ChannelCount(layout))) {
+        if (LayoutForInputChannelOrderPreset(preset) == layout)
+            return preset;
+    }
+    return InputChannelOrderPreset::kUnset;
+}
+
 }  // namespace
 
 int main() {
@@ -77,6 +86,8 @@ int main() {
     CHECK(ChannelLayoutsForChannelCount(6).size() == 2);
     CHECK(ChannelLayoutsForChannelCount(8).size() == 2);
     CHECK(ChannelLayoutsForChannelCount(10).size() == 2);
+    CHECK(ChannelLayoutsForChannelCount(16) ==
+          std::vector<ChannelLayout>({ChannelLayout::k9_1_6}));
     CHECK(DetectChannelLayout(6,
                              {SpeakerPosition::kFrontLeft, SpeakerPosition::kFrontCenter,
                               SpeakerPosition::kFrontRight, SpeakerPosition::kSideLeft,
@@ -94,29 +105,121 @@ int main() {
                               SpeakerPosition::kBackRight, SpeakerPosition::kTopMiddleLeft,
                               SpeakerPosition::kTopMiddleRight, SpeakerPosition::kLowFrequency},
                              true) == ChannelLayout::k7_1_2);
+    const std::vector<SpeakerPosition> nine_one_six_positions = {
+        SpeakerPosition::kFrontLeft, SpeakerPosition::kFrontRight,
+        SpeakerPosition::kFrontCenter, SpeakerPosition::kLowFrequency,
+        SpeakerPosition::kBackLeft, SpeakerPosition::kBackRight,
+        SpeakerPosition::kFrontLeftOfCenter, SpeakerPosition::kFrontRightOfCenter,
+        SpeakerPosition::kSideLeft, SpeakerPosition::kSideRight,
+        SpeakerPosition::kTopFrontLeft, SpeakerPosition::kTopFrontRight,
+        SpeakerPosition::kTopBackLeft, SpeakerPosition::kTopBackRight,
+        SpeakerPosition::kTopMiddleLeft, SpeakerPosition::kTopMiddleRight};
+    CHECK(DetectChannelLayout(16, nine_one_six_positions, true) == ChannelLayout::k9_1_6);
+    CHECK(DetectChannelLayout(16, {}, false) == ChannelLayout::kUnset);
 
-    const std::vector<std::tuple<ChannelLayout, const char*, std::vector<int>>> channel_orders = {
-        {ChannelLayout::kMono, "C", {0}},
-        {ChannelLayout::kStereo, "L / R", {0, 1}},
-        {ChannelLayout::k3_1_2, "L / R / C / LFE / Ltf / Rtf", {0, 1, 2, 3, 4, 5}},
-        {ChannelLayout::k5_1, "L / R / C / LFE / Ls / Rs", {0, 1, 2, 3, 4, 5}},
-        {ChannelLayout::k5_1_2, "L / R / C / LFE / Ls / Rs / Ltf / Rtf",
-         {0, 1, 2, 3, 4, 5, 6, 7}},
-        {ChannelLayout::k5_1_4, "L / R / C / LFE / Ls / Rs / Ltf / Rtf / Ltr / Rtr",
-         {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
-        {ChannelLayout::k7_1, "L / R / C / LFE / Lrs / Rrs / Lss / Rss",
-         {0, 1, 2, 3, 6, 7, 4, 5}},
-        {ChannelLayout::k7_1_2, "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltf / Rtf",
-         {0, 1, 2, 3, 6, 7, 4, 5, 8, 9}},
-        {ChannelLayout::k7_1_4,
-         "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltf / Rtf / Ltb / Rtb",
-         {0, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11}}};
+    const std::vector<std::tuple<InputChannelOrderPreset, ChannelLayout, const char*, const char*,
+                                std::vector<int>>>
+        channel_order_presets = {
+            {InputChannelOrderPreset::kMonoSmpte, ChannelLayout::kMono, "Mono",
+             "C", {0}},
+            {InputChannelOrderPreset::kStereoSmpte, ChannelLayout::kStereo, "Stereo",
+             "L / R", {0, 1}},
+            {InputChannelOrderPreset::k3_1_2Film, ChannelLayout::k3_1_2, "3.1.2 (Film)",
+             "L / C / R / LFE / Ltf / Rtf", {0, 2, 1, 3, 4, 5}},
+            {InputChannelOrderPreset::k3_1_2Smpte, ChannelLayout::k3_1_2, "3.1.2 (SMPTE)",
+             "L / R / C / LFE / Ltf / Rtf", {0, 1, 2, 3, 4, 5}},
+            {InputChannelOrderPreset::k5_1Film, ChannelLayout::k5_1, "5.1 (Film)",
+             "L / C / R / Ls / Rs / LFE", {0, 2, 1, 5, 3, 4}},
+            {InputChannelOrderPreset::k5_1Smpte, ChannelLayout::k5_1, "5.1 (SMPTE)",
+             "L / R / C / LFE / Ls / Rs", {0, 1, 2, 3, 4, 5}},
+            {InputChannelOrderPreset::k5_1_2Film, ChannelLayout::k5_1_2,
+             "5.1.2 (Film)", "L / C / R / Ls / Rs / LFE / Ltf / Rtf",
+             {0, 2, 1, 5, 3, 4, 6, 7}},
+            {InputChannelOrderPreset::k5_1_2Smpte, ChannelLayout::k5_1_2,
+             "5.1.2 (SMPTE)", "L / R / C / LFE / Ls / Rs / Ltf / Rtf",
+             {0, 1, 2, 3, 4, 5, 6, 7}},
+            {InputChannelOrderPreset::k5_1_4Film, ChannelLayout::k5_1_4,
+             "5.1.4 (Film)", "L / C / R / Ls / Rs / LFE / Ltf / Rtf / Ltb / Rtb",
+             {0, 2, 1, 5, 3, 4, 6, 7, 8, 9}},
+            {InputChannelOrderPreset::k5_1_4Smpte, ChannelLayout::k5_1_4,
+             "5.1.4 (SMPTE)", "L / R / C / LFE / Ls / Rs / Ltf / Rtf / Ltb / Rtb",
+             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
+            {InputChannelOrderPreset::k7_1Film, ChannelLayout::k7_1, "7.1 (Film)",
+             "L / C / R / Lss / Rss / Lrs / Rrs / LFE", {0, 2, 1, 7, 3, 4, 5, 6}},
+            {InputChannelOrderPreset::k7_1Smpte, ChannelLayout::k7_1, "7.1 (SMPTE)",
+             "L / R / C / LFE / Lss / Rss / Lrs / Rrs", {0, 1, 2, 3, 4, 5, 6, 7}},
+            {InputChannelOrderPreset::k7_1Wav, ChannelLayout::k7_1, "7.1 (WAV)",
+             "L / R / C / LFE / Lrs / Rrs / Lss / Rss", {0, 1, 2, 3, 6, 7, 4, 5}},
+            {InputChannelOrderPreset::k7_1_2Film, ChannelLayout::k7_1_2,
+             "7.1.2 (Film)", "L / C / R / Lss / Rss / Lrs / Rrs / LFE / Ltm / Rtm",
+             {0, 2, 1, 7, 3, 4, 5, 6, 8, 9}},
+            {InputChannelOrderPreset::k7_1_2Smpte, ChannelLayout::k7_1_2,
+             "7.1.2 (SMPTE)", "L / R / C / LFE / Lss / Rss / Lrs / Rrs / Ltm / Rtm",
+             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}},
+            {InputChannelOrderPreset::k7_1_2Wav, ChannelLayout::k7_1_2,
+             "7.1.2 (WAV)", "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltm / Rtm",
+             {0, 1, 2, 3, 6, 7, 4, 5, 8, 9}},
+            {InputChannelOrderPreset::k7_1_4Film, ChannelLayout::k7_1_4,
+             "7.1.4 (Film)", "L / C / R / Lss / Rss / Lrs / Rrs / LFE / Ltf / Rtf / Ltb / Rtb",
+             {0, 2, 1, 7, 3, 4, 5, 6, 8, 9, 10, 11}},
+            {InputChannelOrderPreset::k7_1_4Smpte, ChannelLayout::k7_1_4,
+             "7.1.4 (SMPTE)", "L / R / C / LFE / Lss / Rss / Lrs / Rrs / Ltf / Rtf / Ltb / Rtb",
+             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},
+            {InputChannelOrderPreset::k7_1_4Wav, ChannelLayout::k7_1_4,
+             "7.1.4 (WAV)", "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltf / Rtf / Ltb / Rtb",
+             {0, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11}},
+            {InputChannelOrderPreset::k9_1_6DolbyAtmos, ChannelLayout::k9_1_6,
+             "9.1.6 (Dolby Atmos)",
+             "L / R / C / LFE / Ls / Rs / Lrs / Rrs / Lw / Rw / Ltf / Rtf / Ltm / Rtm / Ltr / Rtr",
+             {0, 1, 2, 3, 6, 7, 8, 9, 4, 5, 10, 11, 14, 15, 12, 13}},
+        };
     std::vector<int> channel_order;
-    for (const auto& [layout, input_order, expected_mapping] : channel_orders) {
-        CHECK(BuildChannelOrderForIamf(layout, &channel_order, &error));
+    for (const auto& [preset, layout, name, input_order, expected_mapping] : channel_order_presets) {
+        CHECK(LayoutForInputChannelOrderPreset(preset) == layout);
+        CHECK(std::string(InputChannelOrderPresetName(preset)) == name);
+        CHECK(InputChannelOrderDescription(preset) == input_order);
+        CHECK(BuildChannelOrderForIamf(preset, &channel_order, &error));
         CHECK(channel_order == expected_mapping);
-        CHECK(InputChannelOrderDescription(layout) == input_order);
+        const auto available = InputChannelOrderPresetsForChannelCount(ChannelCount(layout));
+        CHECK(std::find(available.begin(), available.end(), preset) != available.end());
     }
+    CHECK(channel_order_presets.size() == 20);
+    CHECK(InputChannelOrderPresetsForChannelCount(1).size() == 1);
+    CHECK(InputChannelOrderPresetsForChannelCount(2).size() == 1);
+    CHECK(InputChannelOrderPresetsForChannelCount(6).size() == 4);
+    CHECK(InputChannelOrderPresetsForChannelCount(8).size() == 5);
+    CHECK(InputChannelOrderPresetsForChannelCount(10).size() == 5);
+    CHECK(InputChannelOrderPresetsForChannelCount(12).size() == 3);
+    CHECK(InputChannelOrderPresetsForChannelCount(16).size() == 1);
+    CHECK(AutomaticInputChannelOrderPresetForChannelCount(1) ==
+          InputChannelOrderPreset::kMonoSmpte);
+    CHECK(AutomaticInputChannelOrderPresetForChannelCount(2) ==
+          InputChannelOrderPreset::kStereoSmpte);
+    CHECK(AutomaticInputChannelOrderPresetForChannelCount(6) ==
+          InputChannelOrderPreset::kUnset);
+    CHECK(AutomaticInputChannelOrderPresetForChannelCount(16) ==
+          InputChannelOrderPreset::kUnset);
+    CHECK((InputChannelOrderPresetsForChannelCount(6) ==
+           std::vector<InputChannelOrderPreset>{InputChannelOrderPreset::k5_1Smpte,
+                                                InputChannelOrderPreset::k5_1Film,
+                                                InputChannelOrderPreset::k3_1_2Smpte,
+                                                InputChannelOrderPreset::k3_1_2Film}));
+    CHECK((InputChannelOrderPresetsForChannelCount(8) ==
+           std::vector<InputChannelOrderPreset>{InputChannelOrderPreset::k7_1Smpte,
+                                                InputChannelOrderPreset::k7_1Wav,
+                                                InputChannelOrderPreset::k7_1Film,
+                                                InputChannelOrderPreset::k5_1_2Smpte,
+                                                InputChannelOrderPreset::k5_1_2Film}));
+    CHECK((InputChannelOrderPresetsForChannelCount(10) ==
+           std::vector<InputChannelOrderPreset>{InputChannelOrderPreset::k7_1_2Smpte,
+                                                InputChannelOrderPreset::k7_1_2Wav,
+                                                InputChannelOrderPreset::k7_1_2Film,
+                                                InputChannelOrderPreset::k5_1_4Smpte,
+                                                InputChannelOrderPreset::k5_1_4Film}));
+    CHECK((InputChannelOrderPresetsForChannelCount(12) ==
+           std::vector<InputChannelOrderPreset>{InputChannelOrderPreset::k7_1_4Smpte,
+                                                InputChannelOrderPreset::k7_1_4Wav,
+                                                InputChannelOrderPreset::k7_1_4Film}));
 
     const std::vector<SpeakerPosition> five_one_source_order = {
         SpeakerPosition::kFrontLeft, SpeakerPosition::kFrontRight,
@@ -128,12 +231,14 @@ int main() {
     detected_five_one.channel_layout_detection_exact = true;
     MuxProject override_project;
     CHECK(override_project.AddInput(detected_five_one, &error));
-    CHECK(override_project.AssignChannelLayout("detected_5_1.wav", ChannelLayout::k3_1_2,
-                                               true, &error));
+    CHECK(override_project.audio_inputs.front().input_channel_order_preset ==
+          InputChannelOrderPreset::kUnset);
+    CHECK(override_project.AssignInputChannelOrderPreset(
+        "detected_5_1.wav", InputChannelOrderPreset::k3_1_2Film, true, &error));
     CHECK(override_project.ValidateForChannelBasedEncoding(&error));
-    CHECK(BuildChannelOrderForIamf(override_project.audio_inputs.front().channel_layout,
-                                  &channel_order, &error));
-    CHECK(channel_order == std::vector<int>({0, 1, 2, 3, 4, 5}));
+    CHECK(BuildChannelOrderForIamf(
+        override_project.audio_inputs.front().input_channel_order_preset, &channel_order, &error));
+    CHECK(channel_order == std::vector<int>({0, 2, 1, 3, 4, 5}));
 
     MediaProbeInfo detected_seven_one = MakeChannelInput(
         "detected_7_1.wav", 8,
@@ -145,19 +250,37 @@ int main() {
     detected_seven_one.channel_layout_detection_exact = true;
     MuxProject relabeled_project;
     CHECK(relabeled_project.AddInput(detected_seven_one, &error));
-    CHECK(relabeled_project.AssignChannelLayout("detected_7_1.wav", ChannelLayout::k5_1_2,
-                                                true, &error));
+    CHECK(relabeled_project.AssignInputChannelOrderPreset(
+        "detected_7_1.wav", InputChannelOrderPreset::k5_1_2Smpte, true, &error));
     CHECK(relabeled_project.ValidateForChannelBasedEncoding(&error));
 
     MuxProject channel_project;
     const std::filesystem::path channel_path = "unknown_10ch.wav";
     CHECK(channel_project.AddInput(MakeChannelInput(channel_path, 10), &error));
-    CHECK(channel_project.AssignChannelLayout(channel_path, ChannelLayout::k7_1_2,
-                                              false, &error));
     CHECK(!channel_project.ValidateForChannelBasedEncoding(&error));
-    CHECK(channel_project.AssignChannelLayout(channel_path, ChannelLayout::k7_1_2,
-                                              true, &error));
+    CHECK(channel_project.AssignInputChannelOrderPreset(
+        channel_path, InputChannelOrderPreset::k7_1_2Smpte, false, &error));
+    CHECK(!channel_project.ValidateForChannelBasedEncoding(&error));
+    CHECK(channel_project.AssignInputChannelOrderPreset(
+        channel_path, InputChannelOrderPreset::k7_1_2Smpte, true, &error));
     CHECK(channel_project.ValidateForChannelBasedEncoding(&error));
+
+    const std::filesystem::path unknown_sixteen_channel_path = "unknown_16ch.wav";
+    MuxProject sixteen_channel_project;
+    CHECK(sixteen_channel_project.AddInput(
+        MakeChannelInput(unknown_sixteen_channel_path, 16), &error));
+    CHECK(sixteen_channel_project.audio_inputs.front().channel_layout == ChannelLayout::kUnset);
+    CHECK(sixteen_channel_project.audio_inputs.front().media.channel_layout_candidates ==
+          std::vector<ChannelLayout>({ChannelLayout::k9_1_6}));
+    CHECK(sixteen_channel_project.AssignInputChannelOrderPreset(
+        unknown_sixteen_channel_path, InputChannelOrderPreset::k7_1_2Smpte, true, &error));
+    CHECK(!sixteen_channel_project.ValidateForChannelBasedEncoding(&error));
+    CHECK(sixteen_channel_project.AssignInputChannelOrderPreset(
+        unknown_sixteen_channel_path, InputChannelOrderPreset::k9_1_6DolbyAtmos, false, &error));
+    CHECK(!sixteen_channel_project.ValidateForChannelBasedEncoding(&error));
+    CHECK(sixteen_channel_project.AssignInputChannelOrderPreset(
+        unknown_sixteen_channel_path, InputChannelOrderPreset::k9_1_6DolbyAtmos, true, &error));
+    CHECK(sixteen_channel_project.ValidateForChannelBasedEncoding(&error));
 
     const auto unique_id = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path metadata_directory =
@@ -205,13 +328,22 @@ int main() {
               "CHANNEL_LABEL_LFE", "CHANNEL_LABEL_LSS_7", "CHANNEL_LABEL_RSS_7",
               "CHANNEL_LABEL_LRS_7", "CHANNEL_LABEL_RRS_7", "CHANNEL_LABEL_LTF_4",
               "CHANNEL_LABEL_RTF_4", "CHANNEL_LABEL_LTB_4", "CHANNEL_LABEL_RTB_4"},
-             {"SOUND_SYSTEM_A_0_2_0", "SOUND_SYSTEM_J_4_7_0"}}};
+             {"SOUND_SYSTEM_A_0_2_0", "SOUND_SYSTEM_J_4_7_0"}},
+            {ChannelLayout::k9_1_6, 9, 7,
+             {"CHANNEL_LABEL_FL", "CHANNEL_LABEL_FR", "CHANNEL_LABEL_FC",
+              "CHANNEL_LABEL_LFE", "CHANNEL_LABEL_BL", "CHANNEL_LABEL_BR",
+              "CHANNEL_LABEL_FLC", "CHANNEL_LABEL_FRC", "CHANNEL_LABEL_SI_L",
+              "CHANNEL_LABEL_SI_R", "CHANNEL_LABEL_TP_FL", "CHANNEL_LABEL_TP_FR",
+              "CHANNEL_LABEL_TP_BL", "CHANNEL_LABEL_TP_BR", "CHANNEL_LABEL_TP_SI_L",
+              "CHANNEL_LABEL_TP_SI_R"},
+             {"SOUND_SYSTEM_A_0_2_0", "SOUND_SYSTEM_13_6_9_0"}}};
     for (const auto& [layout, substream_count, coupled_substream_count, expected_labels,
                       expected_sound_systems] : supported_layouts) {
         MetadataBuildOptions metadata;
         metadata.channel_based.media.path = metadata_directory / "prepared.wav";
         metadata.channel_based.channel_layout = layout;
-        metadata.channel_based.channel_layout_confirmed = true;
+        metadata.channel_based.input_channel_order_preset = FirstPresetForLayout(layout);
+        metadata.channel_based.input_channel_order_confirmed = true;
         MediaStreamInfo stream;
         stream.kind = MediaStreamKind::kAudio;
         stream.channel_count = ChannelCount(layout);
@@ -224,11 +356,25 @@ int main() {
         std::ifstream metadata_file(metadata.output_path, std::ios::binary);
         const std::string serialized((std::istreambuf_iterator<char>(metadata_file)),
                                      std::istreambuf_iterator<char>());
-        CHECK(serialized.find("primary_profile: PROFILE_VERSION_SIMPLE") != std::string::npos);
-        CHECK(serialized.find("additional_profile: PROFILE_VERSION_SIMPLE") != std::string::npos);
-        CHECK(serialized.find("PROFILE_VERSION_BASE") == std::string::npos);
+        const bool base_enhanced = layout == ChannelLayout::k9_1_6;
+        const char* expected_profile = base_enhanced ? "PROFILE_VERSION_BASE_ENHANCED"
+                                                     : "PROFILE_VERSION_SIMPLE";
+        CHECK(serialized.find(std::string("primary_profile: ") + expected_profile) !=
+              std::string::npos);
+        CHECK(serialized.find(std::string("additional_profile: ") + expected_profile) !=
+              std::string::npos);
+        if (base_enhanced)
+            CHECK(serialized.find("PROFILE_VERSION_SIMPLE") == std::string::npos);
+        else
+            CHECK(serialized.find("PROFILE_VERSION_BASE") == std::string::npos);
         CHECK(serialized.find(std::string("loudspeaker_layout: ") + IamfLayoutName(layout)) !=
               std::string::npos);
+        const char* expanded_layout = IamfExpandedLayoutName(layout);
+        if (expanded_layout[0] != '\0')
+            CHECK(serialized.find(std::string("expanded_loudspeaker_layout: ") + expanded_layout) !=
+                  std::string::npos);
+        else
+            CHECK(serialized.find("expanded_loudspeaker_layout:") == std::string::npos);
         CHECK(serialized.find("audio_element_type: AUDIO_ELEMENT_CHANNEL_BASED") != std::string::npos);
         CHECK(serialized.find("HEAD-LOCKED") == std::string::npos);
         CHECK(serialized.find("audio_element_metadata {") == serialized.rfind("audio_element_metadata {"));
@@ -273,7 +419,9 @@ int main() {
             MetadataBuildOptions depth_metadata;
             depth_metadata.channel_based.media.path = metadata_directory / "prepared_depth.wav";
             depth_metadata.channel_based.channel_layout = ChannelLayout::kStereo;
-            depth_metadata.channel_based.channel_layout_confirmed = true;
+            depth_metadata.channel_based.input_channel_order_preset =
+                InputChannelOrderPreset::kStereoSmpte;
+            depth_metadata.channel_based.input_channel_order_confirmed = true;
             MediaStreamInfo depth_stream;
             depth_stream.kind = MediaStreamKind::kAudio;
             depth_stream.channel_count = 2;
@@ -298,7 +446,9 @@ int main() {
     MetadataBuildOptions opus_depth_metadata;
     opus_depth_metadata.channel_based.media.path = metadata_directory / "prepared_opus_24.wav";
     opus_depth_metadata.channel_based.channel_layout = ChannelLayout::kStereo;
-    opus_depth_metadata.channel_based.channel_layout_confirmed = true;
+    opus_depth_metadata.channel_based.input_channel_order_preset =
+        InputChannelOrderPreset::kStereoSmpte;
+    opus_depth_metadata.channel_based.input_channel_order_confirmed = true;
     MediaStreamInfo opus_stream;
     opus_stream.kind = MediaStreamKind::kAudio;
     opus_stream.channel_count = 2;

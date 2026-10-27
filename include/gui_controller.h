@@ -30,12 +30,11 @@ class GuiController final : public QObject {
     Q_PROPERTY(QString spatialAudioPath READ spatialAudioPath NOTIFY projectStateChanged)
     Q_PROPERTY(QString spatialAudioSummary READ spatialAudioSummary NOTIFY projectStateChanged)
     Q_PROPERTY(QStringList spatialAudioTags READ spatialAudioTags NOTIFY projectStateChanged)
-    Q_PROPERTY(QStringList channelLayoutOptions READ channelLayoutOptions NOTIFY projectStateChanged)
-    Q_PROPERTY(QString channelLayoutName READ channelLayoutName NOTIFY projectStateChanged)
-    Q_PROPERTY(QString channelLayoutStatus READ channelLayoutStatus NOTIFY projectStateChanged)
-    Q_PROPERTY(bool channelLayoutDetected READ channelLayoutDetected NOTIFY projectStateChanged)
-    Q_PROPERTY(QString channelOrderDescription READ channelOrderDescription NOTIFY projectStateChanged)
-    Q_PROPERTY(bool channelLayoutConfirmed READ channelLayoutConfirmed NOTIFY projectStateChanged)
+    Q_PROPERTY(QStringList inputChannelOrderOptions READ inputChannelOrderOptions NOTIFY projectStateChanged)
+    Q_PROPERTY(int inputChannelOrderOptionIndex READ inputChannelOrderOptionIndex NOTIFY projectStateChanged)
+    Q_PROPERTY(QString inputChannelOrderStatus READ inputChannelOrderStatus NOTIFY projectStateChanged)
+    Q_PROPERTY(QString inputChannelOrderDescription READ inputChannelOrderDescription NOTIFY projectStateChanged)
+    Q_PROPERTY(bool inputChannelOrderConfirmed READ inputChannelOrderConfirmed NOTIFY projectStateChanged)
     Q_PROPERTY(QString standaloneIamfCodec READ standaloneIamfCodec NOTIFY projectStateChanged)
     Q_PROPERTY(QString headLockedStereoPath READ headLockedStereoPath NOTIFY projectStateChanged)
     Q_PROPERTY(QString headLockedStereoSummary READ headLockedStereoSummary NOTIFY projectStateChanged)
@@ -71,12 +70,11 @@ public:
     QString spatialAudioPath() const;
     QString spatialAudioSummary() const;
     QStringList spatialAudioTags() const;
-    QStringList channelLayoutOptions() const;
-    QString channelLayoutName() const;
-    QString channelLayoutStatus() const;
-    bool channelLayoutDetected() const;
-    QString channelOrderDescription() const;
-    bool channelLayoutConfirmed() const { return channel_layout_confirmed_; }
+    QStringList inputChannelOrderOptions() const;
+    int inputChannelOrderOptionIndex() const;
+    QString inputChannelOrderStatus() const;
+    QString inputChannelOrderDescription() const;
+    bool inputChannelOrderConfirmed() const { return input_channel_order_confirmed_; }
     QString standaloneIamfCodec() const;
     QString headLockedStereoPath() const;
     QString headLockedStereoSummary() const;
@@ -100,7 +98,7 @@ public:
     bool projectReady() const { return project_ready_; }
 
     Q_INVOKABLE void setInputMode(int mode);
-    Q_INVOKABLE void selectChannelLayout(const QString& layout_name);
+    Q_INVOKABLE void selectInputChannelOrderPreset(int option_index);
     Q_INVOKABLE bool canAcceptInputPath(const QString& path, const QString& slot) const;
     Q_INVOKABLE bool addInputFile(const QString& path, const QString& slot);
     Q_INVOKABLE bool addInputFilesToSlot(const QStringList& paths, const QString& slot);
@@ -158,7 +156,9 @@ private:
     std::thread worker_;
     int input_mode_ = -1;
     app::ChannelLayout channel_layout_ = app::ChannelLayout::kUnset;
-    bool channel_layout_confirmed_ = false;
+    app::InputChannelOrderPreset input_channel_order_preset_ =
+        app::InputChannelOrderPreset::kUnset;
+    bool input_channel_order_confirmed_ = false;
     bool project_ready_ = false;
 };
 

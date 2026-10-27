@@ -1188,7 +1188,7 @@ ApplicationWindow {
                                                 spacing: 8
 
                                                 Label {
-                                                    text: "INPUT LAYOUT"
+                                                    text: "INPUT ORDER"
                                                     font.family: window.monoFont
                                                     font.pixelSize: 11
                                                     font.weight: Font.DemiBold
@@ -1200,11 +1200,10 @@ ApplicationWindow {
                                                 }
 
                                                 Label {
-                                                    visible: guiController.channelLayoutConfirmed
+                                                    visible: guiController.inputChannelOrderConfirmed
                                                     Layout.preferredHeight: 24
                                                     verticalAlignment: Text.AlignVCenter
-                                                    text: guiController.channelLayoutDetected
-                                                          ? "DETECTED" : "SELECTED"
+                                                    text: "CONFIRMED"
                                                     font.family: window.monoFont
                                                     font.pixelSize: 9
                                                     font.weight: Font.DemiBold
@@ -1219,10 +1218,10 @@ ApplicationWindow {
                                                 anchors.right: parent.right
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 height: 34
-                                                model: guiController.channelLayoutOptions
-                                                currentIndex: guiController.channelLayoutOptions.indexOf(guiController.channelLayoutName)
+                                                model: guiController.inputChannelOrderOptions
+                                                currentIndex: guiController.inputChannelOrderOptionIndex
                                                 enabled: !guiController.jobRunning &&
-                                                         guiController.channelLayoutOptions.length > 0
+                                                         guiController.inputChannelOrderOptions.length > 0
                                                 font.family: window.font.family
                                                 font.pixelSize: 15
                                                 font.weight: Font.DemiBold
@@ -1232,20 +1231,20 @@ ApplicationWindow {
                                                     rightPadding: 30
                                                     text: channelLayoutSelector.displayText.length > 0
                                                           ? channelLayoutSelector.displayText
-                                                          : (guiController.channelLayoutOptions.length > 0
-                                                             ? "! SELECT LAYOUT" : "UNAVAILABLE")
+                                                          : (guiController.inputChannelOrderOptions.length > 0
+                                                             ? "! SELECT INPUT ORDER" : "UNAVAILABLE")
                                                     color: channelLayoutSelector.displayText.length > 0
                                                            ? "#d8d6d4"
-                                                           : (guiController.channelLayoutOptions.length > 0
+                                                           : (guiController.inputChannelOrderOptions.length > 0
                                                               ? "#ffc48a" : "#9d9d9d")
                                                     font.family: channelLayoutSelector.font.family
                                                     font.pixelSize: channelLayoutSelector.displayText.length > 0
                                                                     ? channelLayoutSelector.font.pixelSize
-                                                                    : (guiController.channelLayoutOptions.length > 0
+                                                                    : (guiController.inputChannelOrderOptions.length > 0
                                                                        ? 12 : 11)
                                                     font.weight: channelLayoutSelector.displayText.length > 0
                                                                  ? channelLayoutSelector.font.weight
-                                                                 : (guiController.channelLayoutOptions.length > 0
+                                                                 : (guiController.inputChannelOrderOptions.length > 0
                                                                     ? Font.DemiBold : Font.Normal)
                                                     horizontalAlignment: Text.AlignHCenter
                                                     verticalAlignment: Text.AlignVCenter
@@ -1253,7 +1252,7 @@ ApplicationWindow {
                                                 }
 
                                                 indicator: Item {
-                                                    visible: guiController.channelLayoutOptions.length > 0
+                                                    visible: guiController.inputChannelOrderOptions.length > 0
                                                     x: channelLayoutSelector.width - width - 10
                                                     y: (channelLayoutSelector.height - height) / 2
                                                     width: 12
@@ -1337,7 +1336,7 @@ ApplicationWindow {
                                                 }
 
                                                 onActivated: function(index) {
-                                                    guiController.selectChannelLayout(guiController.channelLayoutOptions[index])
+                                                    guiController.selectInputChannelOrderPreset(index)
                                                 }
                                             }
 
@@ -1356,7 +1355,7 @@ ApplicationWindow {
                                                                     visualBottomAdjustment
                                                     const maximumY = Math.max(0,
                                                                               channelLayoutControls.height - implicitHeight)
-                                                    if (guiController.channelLayoutOptions.length === 0)
+                                                    if (guiController.inputChannelOrderOptions.length === 0)
                                                         return Math.max(0, Math.min(maximumY, targetY))
 
                                                     const minimumY = channelLayoutSelector.y +
@@ -1370,7 +1369,7 @@ ApplicationWindow {
                                                 Label {
                                                     id: channelOrderDescriptionLabel
                                                     Layout.fillWidth: true
-                                                    text: guiController.channelOrderDescription
+                                                    text: guiController.inputChannelOrderDescription
                                                     font.family: window.monoFont
                                                     font.pixelSize: 10
                                                     color: "#b4b4b4"
@@ -1388,7 +1387,10 @@ ApplicationWindow {
                                                                  channelOrderDescriptionLabel.text.length > 0
                                                         delay: 500
                                                         contentItem: Text {
-                                                            text: "Channels will be interpreted in this order and remapped for IAMF."
+                                                            text: guiController.inputChannelOrderDescription +
+                                                                  (guiController.inputChannelOrderStatus.length > 0
+                                                                       ? "\n" + guiController.inputChannelOrderStatus
+                                                                       : "")
                                                             width: 320
                                                             font.family: window.font.family
                                                             font.pixelSize: 12
@@ -1406,12 +1408,11 @@ ApplicationWindow {
                                                 }
 
                                                 Label {
-                                                    visible: !guiController.channelLayoutConfirmed &&
-                                                             guiController.channelLayoutStatus.length > 0
+                                                    visible: guiController.inputChannelOrderStatus.length > 0
                                                     Layout.fillWidth: true
-                                                    text: guiController.channelLayoutStatus
+                                                    text: guiController.inputChannelOrderStatus
                                                     font.pixelSize: 12
-                                                    color: guiController.channelLayoutConfirmed ? "#a7c7ab" : "#ffc48a"
+                                                    color: guiController.inputChannelOrderConfirmed ? "#a7c7ab" : "#ffc48a"
                                                     wrapMode: Text.WordWrap
                                                     maximumLineCount: 2
                                                     elide: Text.ElideRight

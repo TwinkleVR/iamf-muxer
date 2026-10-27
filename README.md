@@ -12,7 +12,7 @@ IAMF stands for [**Immersive Audio Model and Formats**](https://aomedia.org/spec
 
 - **Standalone IAMF** — mux an existing `.iamf` file into an MP4 container.
 - **Ambisonics** — create IAMF from AmbiX audio with 4, 9, or 16 channels. An optional two-channel Head-Locked Stereo input can be added in this mode.
-- **Channel-based audio** — create IAMF from mono, stereo, 3.1.2, 5.1, 5.1.2, 5.1.4, 7.1, 7.1.2, or 7.1.4 audio.
+- **Channel-based audio** — create IAMF from mono, stereo, 3.1.2, 5.1, 5.1.2, 5.1.4, 7.1, 7.1.2, 7.1.4, or 9.1.6 audio.
 - **YouTube metadata** — choose a video mapping and inject YouTube-compatible spatial video metadata into the MP4.
 - **Multiple audio tracks** — optionally retain the MP4's original audio tracks alongside IAMF, allowing standard audio and one or more IAMF tracks to coexist in the same file.
 - **Encoding choices** — generated IAMF audio can use Opus, LPCM, AAC-LC, or FLAC. An existing IAMF input keeps its encoded audio.
@@ -20,7 +20,7 @@ IAMF stands for [**Immersive Audio Model and Formats**](https://aomedia.org/spec
 ## Quick start
 
 1. Choose **IAMF**, **Ambisonics**, or **Channel-Based** mode.
-2. Add the required audio input. Add Head-Locked Stereo or video when needed.
+2. Add the required audio input. For multichannel Channel-Based audio, choose the input order that matches the source file. Add Head-Locked Stereo or video when needed.
 3. Set the output path and available encoding or video options.
 4. Select **Start** to create the MP4 file.
 

@@ -103,6 +103,15 @@ bool MatchesLayout(ChannelLayout layout, const std::vector<Position>& positions)
                    HasPair(positions, Position::kBackLeft, Position::kBackRight) &&
                    HasPair(positions, Position::kTopFrontLeft, Position::kTopFrontRight) &&
                    HasPair(positions, Position::kTopBackLeft, Position::kTopBackRight);
+        case ChannelLayout::k9_1_6:
+            return SamePositions(positions, {
+                Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+                Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
+                Position::kFrontLeftOfCenter, Position::kFrontRightOfCenter,
+                Position::kSideLeft, Position::kSideRight,
+                Position::kTopFrontLeft, Position::kTopFrontRight,
+                Position::kTopBackLeft, Position::kTopBackRight,
+                Position::kTopMiddleLeft, Position::kTopMiddleRight});
         case ChannelLayout::kUnset:
             return false;
     }
@@ -150,118 +159,147 @@ std::vector<Position> TargetPositions(ChannelLayout layout) {
                     Position::kBackLeft, Position::kBackRight,
                     Position::kTopFrontLeft, Position::kTopFrontRight,
                     Position::kTopBackLeft, Position::kTopBackRight};
+        case ChannelLayout::k9_1_6:
+            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
+                    Position::kFrontLeftOfCenter, Position::kFrontRightOfCenter,
+                    Position::kSideLeft, Position::kSideRight,
+                    Position::kTopFrontLeft, Position::kTopFrontRight,
+                    Position::kTopBackLeft, Position::kTopBackRight,
+                    Position::kTopMiddleLeft, Position::kTopMiddleRight};
         case ChannelLayout::kUnset:
             return {};
     }
     return {};
 }
 
-std::vector<Position> InputPositions(ChannelLayout layout) {
-    switch (layout) {
-        case ChannelLayout::kMono:
-            return {Position::kFrontCenter};
-        case ChannelLayout::kStereo:
-            return {Position::kFrontLeft, Position::kFrontRight};
-        case ChannelLayout::k3_1_2:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kTopFrontLeft, Position::kTopFrontRight};
-        case ChannelLayout::k5_1:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight};
-        case ChannelLayout::k5_1_2:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
-                    Position::kTopFrontLeft, Position::kTopFrontRight};
-        case ChannelLayout::k5_1_4:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
-                    Position::kTopFrontLeft, Position::kTopFrontRight,
-                    Position::kTopBackLeft, Position::kTopBackRight};
-        case ChannelLayout::k7_1:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
-                    Position::kSideLeft, Position::kSideRight};
-        case ChannelLayout::k7_1_2:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
-                    Position::kSideLeft, Position::kSideRight,
-                    Position::kTopFrontLeft, Position::kTopFrontRight};
-        case ChannelLayout::k7_1_4:
-            return {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
-                    Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
-                    Position::kSideLeft, Position::kSideRight,
-                    Position::kTopFrontLeft, Position::kTopFrontRight,
-                    Position::kTopBackLeft, Position::kTopBackRight};
-        case ChannelLayout::kUnset:
-            return {};
-    }
-    return {};
+struct InputPresetDefinition {
+    InputChannelOrderPreset preset;
+    ChannelLayout layout;
+    const char* name;
+    const char* order_description;
+    std::vector<Position> input_positions;
+};
+
+const std::vector<InputPresetDefinition>& InputPresetDefinitions() {
+    static const std::vector<InputPresetDefinition> definitions = {
+        {InputChannelOrderPreset::kMonoSmpte, ChannelLayout::kMono,
+         "Mono", "C", {Position::kFrontCenter}},
+        {InputChannelOrderPreset::kStereoSmpte, ChannelLayout::kStereo,
+         "Stereo", "L / R", {Position::kFrontLeft, Position::kFrontRight}},
+        {InputChannelOrderPreset::k3_1_2Film, ChannelLayout::k3_1_2,
+         "3.1.2 (Film)", "L / C / R / LFE / Ltf / Rtf",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kLowFrequency, Position::kTopFrontLeft, Position::kTopFrontRight}},
+        {InputChannelOrderPreset::k3_1_2Smpte, ChannelLayout::k3_1_2,
+         "3.1.2 (SMPTE)", "L / R / C / LFE / Ltf / Rtf",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kTopFrontLeft, Position::kTopFrontRight}},
+        {InputChannelOrderPreset::k5_1Film, ChannelLayout::k5_1,
+         "5.1 (Film)", "L / C / R / Ls / Rs / LFE",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kLowFrequency}},
+        {InputChannelOrderPreset::k5_1Smpte, ChannelLayout::k5_1,
+         "5.1 (SMPTE)", "L / R / C / LFE / Ls / Rs",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight}},
+        {InputChannelOrderPreset::k5_1_2Film, ChannelLayout::k5_1_2,
+         "5.1.2 (Film)", "L / C / R / Ls / Rs / LFE / Ltf / Rtf",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kLowFrequency,
+          Position::kTopFrontLeft, Position::kTopFrontRight}},
+        {InputChannelOrderPreset::k5_1_2Smpte, ChannelLayout::k5_1_2,
+         "5.1.2 (SMPTE)", "L / R / C / LFE / Ls / Rs / Ltf / Rtf",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kTopFrontLeft, Position::kTopFrontRight}},
+        {InputChannelOrderPreset::k5_1_4Film, ChannelLayout::k5_1_4,
+         "5.1.4 (Film)", "L / C / R / Ls / Rs / LFE / Ltf / Rtf / Ltb / Rtb",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kLowFrequency,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+        {InputChannelOrderPreset::k5_1_4Smpte, ChannelLayout::k5_1_4,
+         "5.1.4 (SMPTE)", "L / R / C / LFE / Ls / Rs / Ltf / Rtf / Ltb / Rtb",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+        {InputChannelOrderPreset::k7_1Film, ChannelLayout::k7_1,
+         "7.1 (Film)", "L / C / R / Lss / Rss / Lrs / Rrs / LFE",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kBackLeft,
+          Position::kBackRight, Position::kLowFrequency}},
+        {InputChannelOrderPreset::k7_1Smpte, ChannelLayout::k7_1,
+         "7.1 (SMPTE)", "L / R / C / LFE / Lss / Rss / Lrs / Rrs",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kBackLeft, Position::kBackRight}},
+        {InputChannelOrderPreset::k7_1Wav, ChannelLayout::k7_1,
+         "7.1 (WAV)", "L / R / C / LFE / Lrs / Rrs / Lss / Rss",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
+          Position::kSideLeft, Position::kSideRight}},
+        {InputChannelOrderPreset::k7_1_2Film, ChannelLayout::k7_1_2,
+         "7.1.2 (Film)", "L / C / R / Lss / Rss / Lrs / Rrs / LFE / Ltm / Rtm",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kBackLeft,
+          Position::kBackRight, Position::kLowFrequency,
+          Position::kTopMiddleLeft, Position::kTopMiddleRight}},
+        {InputChannelOrderPreset::k7_1_2Smpte, ChannelLayout::k7_1_2,
+         "7.1.2 (SMPTE)", "L / R / C / LFE / Lss / Rss / Lrs / Rrs / Ltm / Rtm",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kBackLeft, Position::kBackRight,
+          Position::kTopMiddleLeft, Position::kTopMiddleRight}},
+        {InputChannelOrderPreset::k7_1_2Wav, ChannelLayout::k7_1_2,
+         "7.1.2 (WAV)", "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltm / Rtm",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
+          Position::kSideLeft, Position::kSideRight,
+          Position::kTopMiddleLeft, Position::kTopMiddleRight}},
+        {InputChannelOrderPreset::k7_1_4Film, ChannelLayout::k7_1_4,
+         "7.1.4 (Film)", "L / C / R / Lss / Rss / Lrs / Rrs / LFE / Ltf / Rtf / Ltb / Rtb",
+         {Position::kFrontLeft, Position::kFrontCenter, Position::kFrontRight,
+          Position::kSideLeft, Position::kSideRight, Position::kBackLeft,
+          Position::kBackRight, Position::kLowFrequency,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+        {InputChannelOrderPreset::k7_1_4Smpte, ChannelLayout::k7_1_4,
+         "7.1.4 (SMPTE)", "L / R / C / LFE / Lss / Rss / Lrs / Rrs / Ltf / Rtf / Ltb / Rtb",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kBackLeft, Position::kBackRight,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+        {InputChannelOrderPreset::k7_1_4Wav, ChannelLayout::k7_1_4,
+         "7.1.4 (WAV)", "L / R / C / LFE / Lrs / Rrs / Lss / Rss / Ltf / Rtf / Ltb / Rtb",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kBackLeft, Position::kBackRight,
+          Position::kSideLeft, Position::kSideRight,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+        {InputChannelOrderPreset::k9_1_6DolbyAtmos, ChannelLayout::k9_1_6,
+         "9.1.6 (Dolby Atmos)",
+         "L / R / C / LFE / Ls / Rs / Lrs / Rrs / Lw / Rw / Ltf / Rtf / Ltm / Rtm / Ltr / Rtr",
+         {Position::kFrontLeft, Position::kFrontRight, Position::kFrontCenter,
+          Position::kLowFrequency, Position::kSideLeft, Position::kSideRight,
+          Position::kBackLeft, Position::kBackRight,
+          Position::kFrontLeftOfCenter, Position::kFrontRightOfCenter,
+          Position::kTopFrontLeft, Position::kTopFrontRight,
+          Position::kTopMiddleLeft, Position::kTopMiddleRight,
+          Position::kTopBackLeft, Position::kTopBackRight}},
+    };
+    return definitions;
 }
 
-const char* InputPositionShortName(ChannelLayout layout, Position position) {
-    switch (position) {
-        case Position::kFrontLeft:
-            return "L";
-        case Position::kFrontRight:
-            return "R";
-        case Position::kFrontCenter:
-            return "C";
-        case Position::kLowFrequency:
-            return "LFE";
-        case Position::kSideLeft:
-            return "Lss";
-        case Position::kSideRight:
-            return "Rss";
-        case Position::kBackLeft:
-            switch (layout) {
-                case ChannelLayout::k5_1:
-                case ChannelLayout::k5_1_2:
-                case ChannelLayout::k5_1_4:
-                    return "Ls";
-                case ChannelLayout::k7_1:
-                case ChannelLayout::k7_1_2:
-                case ChannelLayout::k7_1_4:
-                    return "Lrs";
-                default:
-                    return "?";
-            }
-        case Position::kBackRight:
-            switch (layout) {
-                case ChannelLayout::k5_1:
-                case ChannelLayout::k5_1_2:
-                case ChannelLayout::k5_1_4:
-                    return "Rs";
-                case ChannelLayout::k7_1:
-                case ChannelLayout::k7_1_2:
-                case ChannelLayout::k7_1_4:
-                    return "Rrs";
-                default:
-                    return "?";
-            }
-        case Position::kTopFrontLeft:
-            return "Ltf";
-        case Position::kTopFrontRight:
-            return "Rtf";
-        case Position::kTopMiddleLeft:
-            return layout == ChannelLayout::k7_1_2 ? "Ltf" : "?";
-        case Position::kTopMiddleRight:
-            return layout == ChannelLayout::k7_1_2 ? "Rtf" : "?";
-        case Position::kTopBackLeft:
-            if (layout == ChannelLayout::k5_1_4)
-                return "Ltr";
-            if (layout == ChannelLayout::k7_1_4)
-                return "Ltb";
-            return "?";
-        case Position::kTopBackRight:
-            if (layout == ChannelLayout::k5_1_4)
-                return "Rtr";
-            if (layout == ChannelLayout::k7_1_4)
-                return "Rtb";
-            return "?";
-        case Position::kUnknown:
-            return "?";
-    }
-    return "?";
+const InputPresetDefinition* FindInputPreset(InputChannelOrderPreset preset) {
+    const auto& definitions = InputPresetDefinitions();
+    const auto found = std::find_if(definitions.begin(), definitions.end(),
+                                    [preset](const InputPresetDefinition& definition) {
+                                        return definition.preset == preset;
+                                    });
+    return found == definitions.end() ? nullptr : &*found;
 }
 
 int FindTargetPosition(ChannelLayout layout, const std::vector<Position>& positions,
@@ -319,6 +357,8 @@ int ChannelCount(ChannelLayout layout) {
             return 10;
         case ChannelLayout::k7_1_4:
             return 12;
+        case ChannelLayout::k9_1_6:
+            return 16;
         case ChannelLayout::kUnset:
             return 0;
     }
@@ -329,13 +369,101 @@ std::vector<ChannelLayout> ChannelLayoutsForChannelCount(int channel_count) {
     static const std::vector<ChannelLayout> supported = {
         ChannelLayout::kMono, ChannelLayout::kStereo, ChannelLayout::k3_1_2,
         ChannelLayout::k5_1, ChannelLayout::k5_1_2, ChannelLayout::k5_1_4,
-        ChannelLayout::k7_1, ChannelLayout::k7_1_2, ChannelLayout::k7_1_4};
+        ChannelLayout::k7_1, ChannelLayout::k7_1_2, ChannelLayout::k7_1_4,
+        ChannelLayout::k9_1_6};
     std::vector<ChannelLayout> result;
     std::copy_if(supported.begin(), supported.end(), std::back_inserter(result),
                  [channel_count](ChannelLayout layout) {
                      return ChannelCount(layout) == channel_count;
                  });
     return result;
+}
+
+std::vector<InputChannelOrderPreset> InputChannelOrderPresetsForChannelCount(int channel_count) {
+    std::vector<InputChannelOrderPreset> result;
+    for (const InputPresetDefinition& definition : InputPresetDefinitions()) {
+        if (ChannelCount(definition.layout) == channel_count)
+            result.push_back(definition.preset);
+    }
+    const auto layout_priority = [](InputChannelOrderPreset preset) {
+        switch (LayoutForInputChannelOrderPreset(preset)) {
+        case ChannelLayout::k9_1_6:
+            return 9;
+        case ChannelLayout::k7_1:
+        case ChannelLayout::k7_1_2:
+        case ChannelLayout::k7_1_4:
+            return 7;
+        case ChannelLayout::k5_1:
+        case ChannelLayout::k5_1_2:
+        case ChannelLayout::k5_1_4:
+            return 5;
+        case ChannelLayout::k3_1_2:
+            return 3;
+        case ChannelLayout::kStereo:
+            return 2;
+        case ChannelLayout::kMono:
+            return 1;
+        case ChannelLayout::kUnset:
+            return 0;
+        }
+        return 0;
+    };
+    const auto format_priority = [](InputChannelOrderPreset preset) {
+        switch (preset) {
+        case InputChannelOrderPreset::kMonoSmpte:
+        case InputChannelOrderPreset::kStereoSmpte:
+        case InputChannelOrderPreset::k3_1_2Smpte:
+        case InputChannelOrderPreset::k5_1Smpte:
+        case InputChannelOrderPreset::k5_1_2Smpte:
+        case InputChannelOrderPreset::k5_1_4Smpte:
+        case InputChannelOrderPreset::k7_1Smpte:
+        case InputChannelOrderPreset::k7_1_2Smpte:
+        case InputChannelOrderPreset::k7_1_4Smpte:
+        case InputChannelOrderPreset::k9_1_6DolbyAtmos:
+            return 0;
+        case InputChannelOrderPreset::k7_1Wav:
+        case InputChannelOrderPreset::k7_1_2Wav:
+        case InputChannelOrderPreset::k7_1_4Wav:
+            return 1;
+        case InputChannelOrderPreset::k3_1_2Film:
+        case InputChannelOrderPreset::k5_1Film:
+        case InputChannelOrderPreset::k5_1_2Film:
+        case InputChannelOrderPreset::k5_1_4Film:
+        case InputChannelOrderPreset::k7_1Film:
+        case InputChannelOrderPreset::k7_1_2Film:
+        case InputChannelOrderPreset::k7_1_4Film:
+            return 2;
+        case InputChannelOrderPreset::kUnset:
+            return 3;
+        }
+        return 3;
+    };
+    std::stable_sort(result.begin(), result.end(), [&](InputChannelOrderPreset left,
+                                                       InputChannelOrderPreset right) {
+        const int left_layout_priority = layout_priority(left);
+        const int right_layout_priority = layout_priority(right);
+        if (left_layout_priority != right_layout_priority)
+            return left_layout_priority > right_layout_priority;
+        return format_priority(left) < format_priority(right);
+    });
+    return result;
+}
+
+InputChannelOrderPreset AutomaticInputChannelOrderPresetForChannelCount(int channel_count) {
+    if (channel_count != 1 && channel_count != 2)
+        return InputChannelOrderPreset::kUnset;
+    const auto presets = InputChannelOrderPresetsForChannelCount(channel_count);
+    return presets.size() == 1 ? presets.front() : InputChannelOrderPreset::kUnset;
+}
+
+ChannelLayout LayoutForInputChannelOrderPreset(InputChannelOrderPreset preset) {
+    const InputPresetDefinition* definition = FindInputPreset(preset);
+    return definition == nullptr ? ChannelLayout::kUnset : definition->layout;
+}
+
+const char* InputChannelOrderPresetName(InputChannelOrderPreset preset) {
+    const InputPresetDefinition* definition = FindInputPreset(preset);
+    return definition == nullptr ? "" : definition->name;
 }
 
 ChannelLayout DetectChannelLayout(int channel_count,
@@ -354,34 +482,45 @@ ChannelLayout DetectChannelLayout(int channel_count,
     return match;
 }
 
-bool BuildChannelOrderForIamf(ChannelLayout layout,
+bool BuildChannelOrderForIamf(InputChannelOrderPreset preset,
                               std::vector<int>* source_indices_for_output,
                               std::string* error) {
-    if (source_indices_for_output == nullptr || layout == ChannelLayout::kUnset) {
-        SetError(error, "a supported channel layout and mapping result are required");
+    const InputPresetDefinition* definition = FindInputPreset(preset);
+    if (source_indices_for_output == nullptr || definition == nullptr) {
+        SetError(error, "a supported input channel order preset and mapping result are required");
         return false;
     }
+    const ChannelLayout layout = definition->layout;
     const int channel_count = ChannelCount(layout);
     if (channel_count <= 0) {
         SetError(error, "the selected channel layout is not supported");
         return false;
     }
-    const std::vector<Position> input_positions = InputPositions(layout);
+    const std::vector<Position>& input_positions = definition->input_positions;
     const std::vector<Position> target_positions = TargetPositions(layout);
     if (static_cast<int>(input_positions.size()) != channel_count ||
         target_positions.size() != input_positions.size()) {
-        SetError(error, "the selected layout does not have a complete input-to-IAMF channel order");
+        SetError(error, "the selected preset does not have a complete input-to-IAMF channel order");
         return false;
     }
     source_indices_for_output->clear();
     source_indices_for_output->reserve(target_positions.size());
+    std::vector<bool> source_channel_used(input_positions.size(), false);
     for (const Position target : target_positions) {
         const int index = FindTargetPosition(layout, input_positions, target);
-        if (index < 0) {
-            SetError(error, "the selected input order cannot be mapped to the IAMF layout");
+        if (index < 0 || index >= static_cast<int>(input_positions.size()) ||
+            source_channel_used[static_cast<std::size_t>(index)]) {
+            SetError(error, "the selected input order cannot be mapped one-to-one to the IAMF layout");
             return false;
         }
+        source_channel_used[static_cast<std::size_t>(index)] = true;
         source_indices_for_output->push_back(index);
+    }
+    if (std::find(source_channel_used.begin(), source_channel_used.end(), false) !=
+        source_channel_used.end()) {
+        SetError(error, "the selected input order leaves one or more channels unmapped");
+        source_indices_for_output->clear();
+        return false;
     }
     return true;
 }
@@ -406,6 +545,8 @@ const char* ToString(ChannelLayout layout) {
             return "7.1.2";
         case ChannelLayout::k7_1_4:
             return "7.1.4";
+        case ChannelLayout::k9_1_6:
+            return "9.1.6";
         case ChannelLayout::kUnset:
             return "Unselected";
     }
@@ -432,21 +573,23 @@ const char* IamfLayoutName(ChannelLayout layout) {
             return "LOUDSPEAKER_LAYOUT_7_1_2_CH";
         case ChannelLayout::k7_1_4:
             return "LOUDSPEAKER_LAYOUT_7_1_4_CH";
+        case ChannelLayout::k9_1_6:
+            return "LOUDSPEAKER_LAYOUT_EXPANDED";
         case ChannelLayout::kUnset:
             return "";
     }
     return "";
 }
 
-std::string InputChannelOrderDescription(ChannelLayout layout) {
-    const std::vector<Position> input_positions = InputPositions(layout);
-    std::string description;
-    for (const Position position : input_positions) {
-        if (!description.empty())
-            description += " / ";
-        description += InputPositionShortName(layout, position);
-    }
-    return description;
+const char* IamfExpandedLayoutName(ChannelLayout layout) {
+    return layout == ChannelLayout::k9_1_6
+               ? "EXPANDED_LOUDSPEAKER_LAYOUT_9_1_6_CH"
+               : "";
+}
+
+std::string InputChannelOrderDescription(InputChannelOrderPreset preset) {
+    const InputPresetDefinition* definition = FindInputPreset(preset);
+    return definition == nullptr ? std::string{} : definition->order_description;
 }
 
 const char* ToString(InputKind kind) {
@@ -591,10 +734,12 @@ bool MuxProject::AssignAudioRole(const std::filesystem::path& path, AudioRole ro
     return true;
 }
 
-bool MuxProject::AssignChannelLayout(const std::filesystem::path& path, ChannelLayout layout,
-                                     bool confirmed, std::string* error) {
+bool MuxProject::AssignInputChannelOrderPreset(const std::filesystem::path& path,
+                                               InputChannelOrderPreset preset,
+                                               bool confirmed, std::string* error) {
+    const ChannelLayout layout = LayoutForInputChannelOrderPreset(preset);
     if (layout == ChannelLayout::kUnset || ChannelCount(layout) <= 0) {
-        SetError(error, "a supported channel layout must be selected");
+        SetError(error, "a supported input channel order preset must be selected");
         return false;
     }
     const auto target = std::find_if(audio_inputs.begin(), audio_inputs.end(), [&path](const ProjectAudioInput& input) {
@@ -605,7 +750,8 @@ bool MuxProject::AssignChannelLayout(const std::filesystem::path& path, ChannelL
         return false;
     }
     target->channel_layout = layout;
-    target->channel_layout_confirmed = confirmed;
+    target->input_channel_order_preset = preset;
+    target->input_channel_order_confirmed = confirmed;
     return true;
 }
 
@@ -690,12 +836,17 @@ bool MuxProject::ValidateForChannelBasedEncoding(std::string* error) const {
         SetError(error, "Channel-based mode requires a regular audio input");
         return false;
     }
-    if (input.channel_layout == ChannelLayout::kUnset || ChannelCount(input.channel_layout) <= 0) {
-        SetError(error, "select a supported Channel-based layout");
+    if (input.input_channel_order_preset == InputChannelOrderPreset::kUnset) {
+        SetError(error, "select a supported input channel order preset");
         return false;
     }
-    if (!input.channel_layout_confirmed) {
-        SetError(error, "confirm the selected input channel layout");
+    if (input.channel_layout == ChannelLayout::kUnset || ChannelCount(input.channel_layout) <= 0 ||
+        LayoutForInputChannelOrderPreset(input.input_channel_order_preset) != input.channel_layout) {
+        SetError(error, "the selected input order preset does not match a supported Channel-based layout");
+        return false;
+    }
+    if (!input.input_channel_order_confirmed) {
+        SetError(error, "confirm the selected input channel order");
         return false;
     }
     const auto audio_stream = std::find_if(input.media.streams.begin(), input.media.streams.end(),
@@ -708,7 +859,7 @@ bool MuxProject::ValidateForChannelBasedEncoding(std::string* error) const {
         return false;
     }
     std::vector<int> channel_order;
-    if (!BuildChannelOrderForIamf(input.channel_layout, &channel_order, error))
+    if (!BuildChannelOrderForIamf(input.input_channel_order_preset, &channel_order, error))
         return false;
     return true;
 }

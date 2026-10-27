@@ -178,26 +178,6 @@ QString UserFacingJobError(const std::string& error) {
     return summary + QStringLiteral(" See the application log for details.");
 }
 
-QString ChannelLayoutTitle(app::ChannelLayout layout) {
-    if (layout == app::ChannelLayout::kMono)
-        return QStringLiteral("Mono");
-    if (layout == app::ChannelLayout::kStereo)
-        return QStringLiteral("Stereo");
-    return QString::fromLatin1(app::ToString(layout));
-}
-
-app::ChannelLayout ParseChannelLayoutTitle(const QString& name) {
-    for (const app::ChannelLayout layout : {
-             app::ChannelLayout::kMono, app::ChannelLayout::kStereo, app::ChannelLayout::k3_1_2,
-             app::ChannelLayout::k5_1, app::ChannelLayout::k5_1_2,
-             app::ChannelLayout::k5_1_4, app::ChannelLayout::k7_1,
-             app::ChannelLayout::k7_1_2, app::ChannelLayout::k7_1_4}) {
-        if (ChannelLayoutTitle(layout).compare(name, Qt::CaseInsensitive) == 0)
-            return layout;
-    }
-    return app::ChannelLayout::kUnset;
-}
-
 QString ChannelLayoutUnavailableMessage(const app::MediaStreamInfo* stream) {
     const QString generic_message =
         QStringLiteral("No supported layout matches this audio.");
@@ -210,7 +190,7 @@ QString ChannelLayoutUnavailableMessage(const app::MediaStreamInfo* stream) {
         QStringLiteral("5.1"),        QStringLiteral("5.1(side)"), QStringLiteral("5.1(back)"),
         QStringLiteral("5.1.2"),      QStringLiteral("5.1.2(back)"),
         QStringLiteral("5.1.4"),      QStringLiteral("7.1"),      QStringLiteral("7.1.2"),
-        QStringLiteral("7.1.4")};
+        QStringLiteral("7.1.4"),     QStringLiteral("9.1.6")};
     const bool looks_like_named_layout = !layout_name.isEmpty() &&
                                          layout_name.front().isDigit() &&
                                          layout_name.contains(QLatin1Char('.'));
@@ -445,7 +425,8 @@ void GuiController::setInputMode(int mode) {
     spatial_audio_.reset();
     head_locked_stereo_.reset();
     channel_layout_ = app::ChannelLayout::kUnset;
-    channel_layout_confirmed_ = false;
+    input_channel_order_preset_ = app::InputChannelOrderPreset::kUnset;
+    input_channel_order_confirmed_ = false;
     RecalculateProject();
     if (mode == 0) {
         SetStatus(QStringLiteral("IAMF selected. Add a standalone IAMF file to continue."));
@@ -477,73 +458,61 @@ QStringList GuiController::spatialAudioTags() const {
                        spatial_audio_ && !channelBasedMode() ? spatial_audio_->suggested_audio_role
                                                              : app::AudioRole::kUnset);
 }
-QStringList GuiController::channelLayoutOptions() const {
+QStringList GuiController::inputChannelOrderOptions() const {
     QStringList options;
     if (!channelBasedMode() || !spatial_audio_)
         return options;
-    const app::MediaStreamInfo* stream =
-        FirstStream(*spatial_audio_, app::MediaStreamKind::kAudio);
-    if (stream == nullptr)
-        return options;
-
-    std::vector<app::ChannelLayout> layouts = spatial_audio_->channel_layout_candidates;
-    const auto suggested = std::find(layouts.begin(), layouts.end(),
-                                     spatial_audio_->suggested_channel_layout);
-    if (suggested != layouts.end())
-        std::rotate(layouts.begin(), suggested, std::next(suggested));
-    for (const app::ChannelLayout layout : layouts)
-        options.push_back(ChannelLayoutTitle(layout));
+    for (const app::InputChannelOrderPreset preset :
+         app::InputChannelOrderPresetsForChannelCount(ChannelCount(*spatial_audio_)))
+        options.push_back(QString::fromUtf8(app::InputChannelOrderPresetName(preset)));
     return options;
 }
-QString GuiController::channelLayoutName() const {
-    return ChannelLayoutTitle(channel_layout_);
+
+int GuiController::inputChannelOrderOptionIndex() const {
+    if (input_channel_order_preset_ == app::InputChannelOrderPreset::kUnset)
+        return -1;
+    const auto presets = app::InputChannelOrderPresetsForChannelCount(
+        spatial_audio_ ? ChannelCount(*spatial_audio_) : 0);
+    const auto selected = std::find(presets.begin(), presets.end(), input_channel_order_preset_);
+    return selected == presets.end() ? -1 : static_cast<int>(std::distance(presets.begin(), selected));
 }
-QString GuiController::channelOrderDescription() const {
-    if (channel_layout_ == app::ChannelLayout::kUnset)
+
+QString GuiController::inputChannelOrderDescription() const {
+    if (input_channel_order_preset_ == app::InputChannelOrderPreset::kUnset)
         return {};
-    QString description = QString::fromStdString(app::InputChannelOrderDescription(channel_layout_));
+    QString description = QString::fromStdString(
+        app::InputChannelOrderDescription(input_channel_order_preset_));
     description.replace(QStringLiteral(" / "), QStringLiteral(" "));
     return description;
 }
-QString GuiController::channelLayoutStatus() const {
+
+QString GuiController::inputChannelOrderStatus() const {
     if (!channelBasedMode() || !spatial_audio_)
-        return QStringLiteral("Add an audio file to detect its channel layout.");
+        return QStringLiteral("Add an audio file to choose its channel order.");
 
     const app::MediaStreamInfo* stream = FirstStream(*spatial_audio_, app::MediaStreamKind::kAudio);
     if (stream == nullptr)
         return QStringLiteral("The selected input has no audio stream.");
-    if (channelLayoutOptions().isEmpty())
+    if (inputChannelOrderOptions().isEmpty())
         return ChannelLayoutUnavailableMessage(stream);
 
-    if (!channel_layout_confirmed_)
-        return {};
-    if (spatial_audio_->channel_layout_detection_exact &&
-        channel_layout_ == spatial_audio_->suggested_channel_layout)
-        return QStringLiteral("Layout detected from speaker labels.");
-    return QStringLiteral("Input layout confirmed.");
+    return {};
 }
 
-bool GuiController::channelLayoutDetected() const {
-    return channelBasedMode() && spatial_audio_ &&
-           channel_layout_ != app::ChannelLayout::kUnset && channel_layout_confirmed_ &&
-           spatial_audio_->channel_layout_detection_exact &&
-           channel_layout_ == spatial_audio_->suggested_channel_layout;
-}
-
-void GuiController::selectChannelLayout(const QString& layout_name) {
+void GuiController::selectInputChannelOrderPreset(int option_index) {
     if (job_running_ || !channelBasedMode() || !spatial_audio_)
         return;
-    const app::ChannelLayout selected = ParseChannelLayoutTitle(layout_name);
-    const QString selected_name = ChannelLayoutTitle(selected);
-    if (selected == app::ChannelLayout::kUnset ||
-        app::ChannelCount(selected) != ChannelCount(*spatial_audio_) ||
-        std::find(spatial_audio_->channel_layout_candidates.begin(),
-                  spatial_audio_->channel_layout_candidates.end(), selected) ==
-            spatial_audio_->channel_layout_candidates.end() ||
-        !channelLayoutOptions().contains(selected_name))
+    const std::vector<app::InputChannelOrderPreset> presets =
+        app::InputChannelOrderPresetsForChannelCount(ChannelCount(*spatial_audio_));
+    if (option_index < 0 || option_index >= static_cast<int>(presets.size()))
         return;
-    channel_layout_ = selected;
-    channel_layout_confirmed_ = true;
+    const app::InputChannelOrderPreset selected = presets[static_cast<std::size_t>(option_index)];
+    const app::ChannelLayout layout = app::LayoutForInputChannelOrderPreset(selected);
+    if (layout == app::ChannelLayout::kUnset)
+        return;
+    input_channel_order_preset_ = selected;
+    channel_layout_ = layout;
+    input_channel_order_confirmed_ = true;
     RecalculateProject();
     emit projectStateChanged();
 }
@@ -815,7 +784,7 @@ bool GuiController::SetSpatialAudioInput(const app::MediaProbeInfo& info, QStrin
         if (info.kind != app::InputKind::kAudioCandidate ||
             info.channel_layout_candidates.empty()) {
             if (error)
-                *error = QStringLiteral("Channel-based mode supports Mono, Stereo, 3.1.2, 5.1, 5.1.2, 5.1.4, 7.1, 7.1.2, or 7.1.4 audio.");
+                *error = QStringLiteral("Channel-based mode supports Mono, Stereo, 3.1.2, 5.1, 5.1.2, 5.1.4, 7.1, 7.1.2, 7.1.4, or 9.1.6 audio.");
             return false;
         }
         if (spatial_audio_ && !replace_existing) {
@@ -824,10 +793,16 @@ bool GuiController::SetSpatialAudioInput(const app::MediaProbeInfo& info, QStrin
             return false;
         }
         spatial_audio_ = info;
-        channel_layout_ = info.channel_layout_detection_exact
-                              ? info.suggested_channel_layout
-                              : app::ChannelLayout::kUnset;
-        channel_layout_confirmed_ = info.channel_layout_detection_exact;
+        channel_layout_ = app::ChannelLayout::kUnset;
+        input_channel_order_preset_ = app::InputChannelOrderPreset::kUnset;
+        input_channel_order_confirmed_ = false;
+        const app::InputChannelOrderPreset automatic_preset =
+            app::AutomaticInputChannelOrderPresetForChannelCount(ChannelCount(info));
+        if (automatic_preset != app::InputChannelOrderPreset::kUnset) {
+            input_channel_order_preset_ = automatic_preset;
+            channel_layout_ = app::LayoutForInputChannelOrderPreset(automatic_preset);
+            input_channel_order_confirmed_ = true;
+        }
         return true;
     }
 
@@ -901,7 +876,7 @@ bool GuiController::AddProbedInput(const app::MediaProbeInfo& info, const QStrin
         return SetHeadLockedStereoInput(info, error);
     if (error)
         *error = channelBasedMode()
-                     ? QStringLiteral("Channel-based mode requires a supported 1, 2, 6, 8, 10, or 12 channel layout.")
+                     ? QStringLiteral("Channel-based mode requires a supported 1, 2, 6, 8, 10, 12, or 16 channel layout.")
                      : QStringLiteral("Ambisonics mode accepts 4, 9, or 16 channel Ambisonics audio, or exactly 2 channel Head-Locked Stereo Audio.");
     return false;
 }
@@ -1045,7 +1020,8 @@ void GuiController::clearInput(const QString& slot) {
     } else if (slot == QStringLiteral("spatial")) {
         spatial_audio_.reset();
         channel_layout_ = app::ChannelLayout::kUnset;
-        channel_layout_confirmed_ = false;
+        input_channel_order_preset_ = app::InputChannelOrderPreset::kUnset;
+        input_channel_order_confirmed_ = false;
         mix_annotation_ = QStringLiteral("default mix presentation");
         emit projectOptionsChanged();
     } else if (slot == QStringLiteral("headlocked")) {
@@ -1078,8 +1054,9 @@ void GuiController::RecalculateProject() {
                                          true, &ignored);
             }
         } else if (channelBasedMode()) {
-            project_.AssignChannelLayout(spatial_audio_->path, channel_layout_,
-                                         channel_layout_confirmed_, &ignored);
+            project_.AssignInputChannelOrderPreset(spatial_audio_->path,
+                                                   input_channel_order_preset_,
+                                                   input_channel_order_confirmed_, &ignored);
         }
     }
     project_.video_mapping.preset =
@@ -1245,8 +1222,8 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
     std::vector<int> channel_order;
     if (channel_based) {
         std::string mapping_error;
-        if (!app::BuildChannelOrderForIamf(primary_input.channel_layout, &channel_order,
-                                           &mapping_error)) {
+        if (!app::BuildChannelOrderForIamf(primary_input.input_channel_order_preset,
+                                           &channel_order, &mapping_error)) {
             SetStatus(QStringLiteral("Cannot map the source channel order: ") +
                       QString::fromUtf8(mapping_error.c_str()));
             return;
@@ -1287,19 +1264,21 @@ void GuiController::StartAudioEncodingMux(bool channel_based) {
                                       : generated_codec == 3 ? "FLAC"
                                                             : "Opus";
     IAMF_MUX_LOG_INFO(
-        "[GUI] starting encoded audio mux: mode={} audio_role={} channel_layout={} generated_codec={} include_video={} video_mapping={} keep_mp4_audio={} overwrite_existing={} output={} mix_annotation={}",
+        "[GUI] starting encoded audio mux: mode={} audio_role={} channel_layout={} input_order_preset={} generated_codec={} include_video={} video_mapping={} keep_mp4_audio={} overwrite_existing={} output={} mix_annotation={}",
         channel_based ? "channel-based" : "ambisonics",
         app::ToString(primary_input.role), app::ToString(primary_input.channel_layout),
+        app::InputChannelOrderPresetName(primary_input.input_channel_order_preset),
         generated_codec_name, include_video,
         VideoMappingPresetLabel(project_snapshot.video_mapping.preset),
         project_snapshot.keep_mp4_audio, project_snapshot.overwrite_existing_files,
         project_snapshot.output_path.u8string(), mix_annotation);
     for (const app::ProjectAudioInput& input : project_snapshot.audio_inputs) {
         IAMF_MUX_LOG_INFO(
-            "[GUI] audio source: path={} role={} channel_layout={} role_confirmed={} layout_confirmed={}",
+            "[GUI] audio source: path={} role={} channel_layout={} input_order_preset={} role_confirmed={} order_confirmed={}",
             input.media.path.u8string(), app::ToString(input.role),
-            app::ToString(input.channel_layout), input.role_confirmed,
-            input.channel_layout_confirmed);
+            app::ToString(input.channel_layout),
+            app::InputChannelOrderPresetName(input.input_channel_order_preset),
+            input.role_confirmed, input.input_channel_order_confirmed);
     }
     if (project_snapshot.video) {
         IAMF_MUX_LOG_INFO("[GUI] video source: path={} included={}",

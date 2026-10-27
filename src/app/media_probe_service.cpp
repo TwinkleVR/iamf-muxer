@@ -112,6 +112,10 @@ SpeakerPosition SpeakerPositionFromAvChannel(AVChannel channel) {
             return SpeakerPosition::kFrontRight;
         case AV_CHAN_FRONT_CENTER:
             return SpeakerPosition::kFrontCenter;
+        case AV_CHAN_FRONT_LEFT_OF_CENTER:
+            return SpeakerPosition::kFrontLeftOfCenter;
+        case AV_CHAN_FRONT_RIGHT_OF_CENTER:
+            return SpeakerPosition::kFrontRightOfCenter;
         case AV_CHAN_LOW_FREQUENCY:
             return SpeakerPosition::kLowFrequency;
         case AV_CHAN_SIDE_LEFT:

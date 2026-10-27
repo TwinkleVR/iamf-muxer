@@ -37,6 +37,31 @@ enum class ChannelLayout {
     k7_1,
     k7_1_2,
     k7_1_4,
+    k9_1_6,
+};
+
+enum class InputChannelOrderPreset {
+    kUnset,
+    kMonoSmpte,
+    kStereoSmpte,
+    k3_1_2Film,
+    k3_1_2Smpte,
+    k5_1Film,
+    k5_1Smpte,
+    k5_1_2Film,
+    k5_1_2Smpte,
+    k5_1_4Film,
+    k5_1_4Smpte,
+    k7_1Film,
+    k7_1Smpte,
+    k7_1Wav,
+    k7_1_2Film,
+    k7_1_2Smpte,
+    k7_1_2Wav,
+    k7_1_4Film,
+    k7_1_4Smpte,
+    k7_1_4Wav,
+    k9_1_6DolbyAtmos,
 };
 
 // FFmpeg-independent channel identities retained by the probe layer for
@@ -46,6 +71,8 @@ enum class SpeakerPosition {
     kFrontLeft,
     kFrontRight,
     kFrontCenter,
+    kFrontLeftOfCenter,
+    kFrontRightOfCenter,
     kLowFrequency,
     kSideLeft,
     kSideRight,
@@ -112,7 +139,8 @@ struct ProjectAudioInput {
     AudioRole role = AudioRole::kUnset;
     bool role_confirmed = false;
     ChannelLayout channel_layout = ChannelLayout::kUnset;
-    bool channel_layout_confirmed = false;
+    InputChannelOrderPreset input_channel_order_preset = InputChannelOrderPreset::kUnset;
+    bool input_channel_order_confirmed = false;
 };
 
 struct MuxProject {
@@ -128,8 +156,9 @@ struct MuxProject {
     bool AddInput(const MediaProbeInfo& input, std::string* error);
     bool RemoveInput(const std::filesystem::path& path, std::string* error);
     bool AssignAudioRole(const std::filesystem::path& path, AudioRole role, bool confirmed, std::string* error);
-    bool AssignChannelLayout(const std::filesystem::path& path, ChannelLayout layout,
-                             bool confirmed, std::string* error);
+    bool AssignInputChannelOrderPreset(const std::filesystem::path& path,
+                                       InputChannelOrderPreset preset, bool confirmed,
+                                       std::string* error);
     bool ValidateForExistingIamfMux(std::string* error) const;
     bool ValidateForAudioEncoding(std::string* error) const;
     bool ValidateForChannelBasedEncoding(std::string* error) const;
@@ -139,15 +168,20 @@ struct MuxProject {
 bool IsAmbisonicsRole(AudioRole role);
 int ChannelCount(ChannelLayout layout);
 std::vector<ChannelLayout> ChannelLayoutsForChannelCount(int channel_count);
+std::vector<InputChannelOrderPreset> InputChannelOrderPresetsForChannelCount(int channel_count);
+InputChannelOrderPreset AutomaticInputChannelOrderPresetForChannelCount(int channel_count);
+ChannelLayout LayoutForInputChannelOrderPreset(InputChannelOrderPreset preset);
+const char* InputChannelOrderPresetName(InputChannelOrderPreset preset);
 ChannelLayout DetectChannelLayout(int channel_count,
                                   const std::vector<SpeakerPosition>& positions,
                                   bool positions_complete);
-bool BuildChannelOrderForIamf(ChannelLayout layout,
+bool BuildChannelOrderForIamf(InputChannelOrderPreset preset,
                               std::vector<int>* source_indices_for_output,
                               std::string* error);
 const char* ToString(ChannelLayout layout);
 const char* IamfLayoutName(ChannelLayout layout);
-std::string InputChannelOrderDescription(ChannelLayout layout);
+const char* IamfExpandedLayoutName(ChannelLayout layout);
+std::string InputChannelOrderDescription(InputChannelOrderPreset preset);
 const char* ToString(InputKind kind);
 const char* ToString(AudioRole role);
 const char* ToString(ProjectMode mode);
